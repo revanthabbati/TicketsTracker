@@ -8,6 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
@@ -86,7 +87,7 @@
         .stat-value { font-size: 2rem; font-weight: 700; }
 
         /* --- DASHBOARD GRID & PANELS --- */
-        .dashboard-grid { display: grid; grid-template-columns: 1fr 1.1fr; gap: 1.5rem; }
+        .dashboard-grid { display: grid; grid-template-columns: 1fr 1.1fr; gap: 1.5rem; align-items: start; }
         .panel { background: var(--bg-panel); border: 1px solid var(--border-light); border-radius: var(--radius-lg); box-shadow: var(--shadow-drop); display: flex; flex-direction: column; overflow: hidden; transition: var(--trans); }
         .panel-header { padding: 1.25rem 1.5rem; border-bottom: 1px solid var(--border-light); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;}
         .panel-header h2 { font-size: 0.85rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); display: flex; align-items: center; gap: 0.5rem;}
@@ -110,6 +111,7 @@
         .input-group label { display: block; font-size: 0.75rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; margin-bottom: 0.5rem; letter-spacing: 0.05em;}
         .input-control { width: 100%; padding: 0.85rem 1rem; background: var(--bg-input); border: 1px solid var(--border-light); color: var(--text-main); border-radius: var(--radius-md); font-size: 0.95rem; transition: var(--trans); }
         .input-control:focus { border-color: var(--brand-purple); outline: none; box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.15); }
+        .input-control:disabled { opacity: 0.4; cursor: not-allowed; }
         
         .action-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem; }
         .btn { padding: 0.85rem 1rem; border-radius: var(--radius-md); font-size: 0.9rem; font-weight: 600; cursor: pointer; border: none; transition: var(--trans); display: flex; align-items: center; justify-content: center; gap: 0.5rem; white-space: nowrap;}
@@ -140,12 +142,16 @@
         input:checked + .slider { background-color: #10b981; }
         input:checked + .slider:before { transform: translateX(16px); }
 
+        /* --- DAY-SPECIFIC SHIFTS UI --- */
+        .shift-day-row { display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem 0; border-bottom: 1px solid var(--border-light); }
+        .shift-day-row:last-child { border-bottom: none; }
+        .day-label { width: 45px; font-weight: 600; color: var(--text-muted); }
+        .time-box { flex: 1; display: flex; align-items: center; gap: 0.5rem; }
+
         /* --- CHART & ACTIVITY FEED --- */
         .chart-wrapper-overflow { overflow-x: auto; width: 100%; margin-bottom: 1.5rem; border-bottom: 1px solid var(--border-light); padding-bottom: 1.5rem;}
         .chart-container { height: 180px; min-width: 100%; position: relative;}
         .activity-feed { display: flex; flex-direction: column; gap: 1.2rem; max-height: 200px; overflow-y: auto; padding-right: 0.5rem; }
-        .activity-feed::-webkit-scrollbar { width: 4px; }
-        .activity-feed::-webkit-scrollbar-thumb { background: var(--border-light); border-radius: 4px; }
         .activity-item { display: flex; align-items: center; gap: 0.85rem; }
         .activity-avatar { width: 30px; height: 30px; border-radius: 50%; object-fit: cover;}
         .activity-text { flex: 1; font-size: 0.85rem; color: var(--text-muted); line-height: 1.4;}
@@ -156,6 +162,7 @@
         .badge { background: rgba(126, 34, 206, 0.15); padding: 0.35rem 0.85rem; border-radius: 20px; font-size: 0.75rem; color: var(--brand-blue); font-weight: 700;}
         [data-theme="dark"] .badge { background: rgba(255,255,255,0.05); color: var(--text-muted); }
         .badge-role { background: rgba(16, 185, 129, 0.15); color: #10b981; margin-left: 0.5rem; font-size: 0.7rem; padding: 0.15rem 0.5rem;}
+        .badge-shift { background: var(--bg-hover); color: var(--text-main); border: 1px solid var(--border-light); border-radius: 6px; padding: 2px 6px; font-size: 0.7rem; display: inline-block; white-space: nowrap;}
         
         table { width: 100%; border-collapse: collapse; text-align: left; }
         th { position: sticky; top: 0; background: var(--bg-panel); padding: 1rem 1.25rem; font-size: 0.75rem; font-weight: 600; color: var(--text-muted); border-bottom: 1px solid var(--border-light); text-transform: uppercase; z-index: 2;}
@@ -182,16 +189,8 @@
         .toast { background: var(--brand-blue); color: white; padding: 1rem 1.5rem; border-radius: var(--radius-md); font-size: 0.9rem; font-weight: 500; box-shadow: var(--shadow-drop); animation: slideIn 0.3s ease, fadeOut 0.3s ease 3s forwards; }
         @keyframes slideIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
         @keyframes fadeOut { to { opacity: 0; } }
-        
-        /* Checkbox Grid for Shifts */
-        .days-grid { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.5rem; }
-        .day-check { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 50%; background: var(--bg-input); border: 1px solid var(--border-light); cursor: pointer; font-size: 0.75rem; font-weight: 600; color: var(--text-muted); transition: var(--trans); }
-        .day-check input { display: none; }
-        .day-check:has(input:checked) { background: var(--brand-blue); color: white; border-color: var(--brand-blue); }
 
-        /* Export/Import Buttons Grid */
         .data-controls { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;}
-
         hr.divider { border: 0; border-top: 1px solid var(--border-light); margin: 1.5rem 0; }
 
     </style>
@@ -342,7 +341,6 @@
                                     </div>
                                     <button type="submit" class="btn btn-primary" style="width: 100%; background: #0ea5e9;">Assign to CSE</button>
                                 </form>
-
                             </div>
                         </div>
 
@@ -479,13 +477,13 @@
                     <div class="view-header-flex" style="margin-bottom: 1.5rem;">
                         <div class="page-title">
                             <h1>Shift Timings</h1>
-                            <p>Configure automated availability schedules for your team.</p>
+                            <p>Configure specific automated availability schedules per day.</p>
                         </div>
                     </div>
 
                     <div class="dashboard-grid">
                         <div class="panel" style="align-self: start;">
-                            <div class="panel-header"><h2>Configure Shift</h2></div>
+                            <div class="panel-header"><h2>Configure Daily Shifts</h2></div>
                             <div class="panel-body">
                                 <div class="input-group">
                                     <label>Select Agent</label>
@@ -495,32 +493,70 @@
                                 </div>
 
                                 <form id="form-shift" class="hidden">
-                                    <div class="input-group">
-                                        <label>Work Days</label>
-                                        <div class="days-grid">
-                                            <label class="day-check"><input type="checkbox" name="workdays" value="1">M</label>
-                                            <label class="day-check"><input type="checkbox" name="workdays" value="2">T</label>
-                                            <label class="day-check"><input type="checkbox" name="workdays" value="3">W</label>
-                                            <label class="day-check"><input type="checkbox" name="workdays" value="4">T</label>
-                                            <label class="day-check"><input type="checkbox" name="workdays" value="5">F</label>
-                                            <label class="day-check"><input type="checkbox" name="workdays" value="6">S</label>
-                                            <label class="day-check"><input type="checkbox" name="workdays" value="0">S</label>
+                                    
+                                    <div style="margin-bottom: 1.5rem;">
+                                        <div class="shift-day-row">
+                                            <label class="switch"><input type="checkbox" class="day-toggle" data-day="1"><span class="slider"></span></label>
+                                            <div class="day-label">Mon</div>
+                                            <div class="time-box">
+                                                <input type="time" class="input-control time-input" data-day="1" data-type="start" disabled> <span>to</span>
+                                                <input type="time" class="input-control time-input" data-day="1" data-type="end" disabled>
+                                            </div>
+                                        </div>
+                                        <div class="shift-day-row">
+                                            <label class="switch"><input type="checkbox" class="day-toggle" data-day="2"><span class="slider"></span></label>
+                                            <div class="day-label">Tue</div>
+                                            <div class="time-box">
+                                                <input type="time" class="input-control time-input" data-day="2" data-type="start" disabled> <span>to</span>
+                                                <input type="time" class="input-control time-input" data-day="2" data-type="end" disabled>
+                                            </div>
+                                        </div>
+                                        <div class="shift-day-row">
+                                            <label class="switch"><input type="checkbox" class="day-toggle" data-day="3"><span class="slider"></span></label>
+                                            <div class="day-label">Wed</div>
+                                            <div class="time-box">
+                                                <input type="time" class="input-control time-input" data-day="3" data-type="start" disabled> <span>to</span>
+                                                <input type="time" class="input-control time-input" data-day="3" data-type="end" disabled>
+                                            </div>
+                                        </div>
+                                        <div class="shift-day-row">
+                                            <label class="switch"><input type="checkbox" class="day-toggle" data-day="4"><span class="slider"></span></label>
+                                            <div class="day-label">Thu</div>
+                                            <div class="time-box">
+                                                <input type="time" class="input-control time-input" data-day="4" data-type="start" disabled> <span>to</span>
+                                                <input type="time" class="input-control time-input" data-day="4" data-type="end" disabled>
+                                            </div>
+                                        </div>
+                                        <div class="shift-day-row">
+                                            <label class="switch"><input type="checkbox" class="day-toggle" data-day="5"><span class="slider"></span></label>
+                                            <div class="day-label">Fri</div>
+                                            <div class="time-box">
+                                                <input type="time" class="input-control time-input" data-day="5" data-type="start" disabled> <span>to</span>
+                                                <input type="time" class="input-control time-input" data-day="5" data-type="end" disabled>
+                                            </div>
+                                        </div>
+                                        <div class="shift-day-row">
+                                            <label class="switch"><input type="checkbox" class="day-toggle" data-day="6"><span class="slider"></span></label>
+                                            <div class="day-label">Sat</div>
+                                            <div class="time-box">
+                                                <input type="time" class="input-control time-input" data-day="6" data-type="start" disabled> <span>to</span>
+                                                <input type="time" class="input-control time-input" data-day="6" data-type="end" disabled>
+                                            </div>
+                                        </div>
+                                        <div class="shift-day-row">
+                                            <label class="switch"><input type="checkbox" class="day-toggle" data-day="0"><span class="slider"></span></label>
+                                            <div class="day-label">Sun</div>
+                                            <div class="time-box">
+                                                <input type="time" class="input-control time-input" data-day="0" data-type="start" disabled> <span>to</span>
+                                                <input type="time" class="input-control time-input" data-day="0" data-type="end" disabled>
+                                            </div>
                                         </div>
                                     </div>
-                                    <div class="action-row">
-                                        <div class="input-group">
-                                            <label>Start Time</label>
-                                            <input type="time" id="shift-start" class="input-control" required>
-                                        </div>
-                                        <div class="input-group">
-                                            <label>End Time</label>
-                                            <input type="time" id="shift-end" class="input-control" required>
-                                        </div>
-                                    </div>
+                                    
                                     <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 1.5rem; line-height: 1.4;">
-                                        * System automatically evaluates Night Shifts. If the End Time is before Start Time, it will seamlessly span across midnight.
+                                        * If the End Time is before Start Time (e.g. 21:00 to 06:00), the system automatically knows it's a Night Shift bridging into the next day.
                                     </div>
-                                    <button type="submit" class="btn btn-primary" style="width: 100%;">Save Shift Schedule</button>
+                                    <button type="submit" class="btn btn-primary" style="width: 100%;">Save Weekly Schedule</button>
                                 </form>
                             </div>
                         </div>
@@ -532,8 +568,7 @@
                                     <thead>
                                         <tr>
                                             <th>Agent Name</th>
-                                            <th>Days</th>
-                                            <th>Timings</th>
+                                            <th>Shift Breakdown</th>
                                         </tr>
                                     </thead>
                                     <tbody id="table-shifts"></tbody>
@@ -614,7 +649,7 @@
                     <select id="edit-ticket-agent" class="input-control" required></select>
                 </div>
                 <div class="input-group">
-                    <label>Ticket Reference URL</label>
+                    <label>Ticket Reference URL / ID</label>
                     <input type="text" id="edit-ticket-url" class="input-control" required autocomplete="off">
                 </div>
                 <div style="display: flex; gap: 1rem; margin-top: 2rem;">
@@ -761,6 +796,7 @@
 
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
+        // Note: keeping "system_state" explicitly to match your existing live database data
         const docRef = doc(db, "routerpro", "system_state");
 
         // Helper Function for clean AM/PM times
@@ -776,14 +812,14 @@
         /** --- ENTERPRISE STATE MANAGEMENT --- **/
         const State = {
             users: [],
-            currentUser: JSON.parse(localStorage.getItem('ent_v12_currUser')) || null,
+            currentUser: JSON.parse(localStorage.getItem('ent_v13_currUser')) || null,
             agents: [],
             tickets: [],
             activities: [],
             queueIdx: 0,
             
             async commit() {
-                localStorage.setItem('ent_v12_currUser', JSON.stringify(this.currentUser));
+                localStorage.setItem('ent_v13_currUser', JSON.stringify(this.currentUser));
                 try {
                     await setDoc(docRef, {
                         users: this.users,
@@ -807,11 +843,22 @@
                     permissions: u.permissions || { manageAgents: false, manageShifts: false }
                 }));
                 
-                State.agents = (data.agents || []).map(a => ({
-                    ...a,
-                    isAvailable: typeof a.isAvailable !== 'undefined' ? a.isAvailable : true,
-                    role: a.role || 'support' // Default missing roles to support
-                }));
+                State.agents = (data.agents || []).map(a => {
+                    // MIGRATION: Convert old `a.shift = {days: [], start:'', end:''}` to new day-by-day `a.shifts` map
+                    let newShifts = a.shifts || {};
+                    if (a.shift && Object.keys(newShifts).length === 0) {
+                        a.shift.days.forEach(d => {
+                            newShifts[d] = { start: a.shift.start, end: a.shift.end };
+                        });
+                    }
+
+                    return {
+                        ...a,
+                        isAvailable: typeof a.isAvailable !== 'undefined' ? a.isAvailable : true,
+                        role: a.role || 'support',
+                        shifts: newShifts
+                    };
+                });
 
                 State.tickets = data.tickets || [];
                 State.activities = data.activities || [];
@@ -904,8 +951,6 @@
 
             shiftAgentSelect: document.getElementById('shift-agent-select'),
             formShift: document.getElementById('form-shift'),
-            shiftStart: document.getElementById('shift-start'),
-            shiftEnd: document.getElementById('shift-end'),
             tableShifts: document.getElementById('table-shifts'),
 
             formUser: document.getElementById('form-user'),
@@ -976,7 +1021,7 @@
             }
         };
 
-        /** --- AUTOMATED SHIFT CRON ENGINE --- **/
+        /** --- AUTOMATED SHIFT CRON ENGINE (DAY-SPECIFIC) --- **/
         function evaluateAgentShifts() {
             if (State.agents.length === 0) return;
             const now = new Date();
@@ -987,27 +1032,38 @@
             let stateChanged = false;
 
             State.agents.forEach(agent => {
-                if (!agent.shift) return; 
-
-                const [sH, sM] = agent.shift.start.split(':').map(Number);
-                const [eH, eM] = agent.shift.end.split(':').map(Number);
-                const startMins = sH * 60 + sM;
-                const endMins = eH * 60 + eM;
+                if (!agent.shifts || Object.keys(agent.shifts).length === 0) return; 
 
                 let isSupposedToBeActive = false;
+                const todayShift = agent.shifts[currentDay];
+                const yesterdayShift = agent.shifts[prevDay];
 
-                if (startMins <= endMins) {
-                    // Standard shift
-                    if (agent.shift.days.includes(currentDay) && currentMins >= startMins && currentMins < endMins) {
-                        isSupposedToBeActive = true;
+                // 1. Check if they have a shift that started today
+                if (todayShift) {
+                    const [sH, sM] = todayShift.start.split(':').map(Number);
+                    const [eH, eM] = todayShift.end.split(':').map(Number);
+                    const startMins = sH * 60 + sM;
+                    const endMins = eH * 60 + eM;
+
+                    if (startMins <= endMins) {
+                        // Standard Day Shift
+                        if (currentMins >= startMins && currentMins < endMins) isSupposedToBeActive = true;
+                    } else {
+                        // Night Shift starting today
+                        if (currentMins >= startMins) isSupposedToBeActive = true;
                     }
-                } else {
-                    // Night shift logic crossing midnight
-                    if (agent.shift.days.includes(currentDay) && currentMins >= startMins) {
-                        isSupposedToBeActive = true;
-                    }
-                    if (agent.shift.days.includes(prevDay) && currentMins < endMins) {
-                        isSupposedToBeActive = true;
+                }
+
+                // 2. Check if they are still on a night shift that started yesterday
+                if (!isSupposedToBeActive && yesterdayShift) {
+                    const [sH, sM] = yesterdayShift.start.split(':').map(Number);
+                    const [eH, eM] = yesterdayShift.end.split(':').map(Number);
+                    const startMins = sH * 60 + sM;
+                    const endMins = eH * 60 + eM;
+
+                    if (startMins > endMins) {
+                        // It was a night shift, checking if we are still before end time today
+                        if (currentMins < endMins) isSupposedToBeActive = true;
                     }
                 }
 
@@ -1078,6 +1134,20 @@
             UI.shiftAgentSelect.addEventListener('change', handleShiftAgentSelect);
             UI.formShift.addEventListener('submit', processSaveShift);
             
+            // Shift UI interactions
+            document.querySelectorAll('.day-toggle').forEach(toggle => {
+                toggle.addEventListener('change', (e) => {
+                    const day = e.target.dataset.day;
+                    const inputs = document.querySelectorAll(`.time-input[data-day="${day}"]`);
+                    inputs.forEach(inp => {
+                        inp.disabled = !e.target.checked;
+                        if(e.target.checked && !inp.value) {
+                            inp.value = inp.dataset.type === 'start' ? '09:00' : '17:00';
+                        }
+                    });
+                });
+            });
+
             // Export/Import Listeners
             UI.btnExportCSV.addEventListener('click', exportCSV);
             UI.btnExportPDF.addEventListener('click', exportPDF);
@@ -1517,7 +1587,8 @@
                     profilePic: pic,
                     slackUrl: slack,
                     total: 0, 
-                    isAvailable: true 
+                    isAvailable: true,
+                    shifts: {} // Setup empty shifts map
                 });
                 UI.inputAgent.value = '';
                 UI.inputAgentPic.value = '';
@@ -1539,21 +1610,28 @@
             const agent = State.agents.find(a => a.id === agentId);
             UI.formShift.classList.remove('hidden');
             
-            document.querySelectorAll('input[name="workdays"]').forEach(cb => cb.checked = false);
+            // Reset all UI
+            document.querySelectorAll('.day-toggle').forEach(cb => cb.checked = false);
+            document.querySelectorAll('.time-input').forEach(inp => {
+                inp.disabled = true;
+                inp.value = '';
+            });
 
-            if (agent && agent.shift) {
-                UI.shiftStart.value = agent.shift.start;
-                UI.shiftEnd.value = agent.shift.end;
-                agent.shift.days.forEach(d => {
-                    const cb = document.querySelector(`input[name="workdays"][value="${d}"]`);
-                    if(cb) cb.checked = true;
-                });
-            } else {
-                UI.shiftStart.value = '09:00';
-                UI.shiftEnd.value = '17:00';
-                [1,2,3,4,5].forEach(d => {
-                    document.querySelector(`input[name="workdays"][value="${d}"]`).checked = true;
-                });
+            if (agent && agent.shifts) {
+                for (let i = 0; i < 7; i++) {
+                    if (agent.shifts[i]) {
+                        const toggle = document.querySelector(`.day-toggle[data-day="${i}"]`);
+                        if(toggle) {
+                            toggle.checked = true;
+                            const startInp = document.querySelector(`.time-input[data-day="${i}"][data-type="start"]`);
+                            const endInp = document.querySelector(`.time-input[data-day="${i}"][data-type="end"]`);
+                            startInp.disabled = false;
+                            endInp.disabled = false;
+                            startInp.value = agent.shifts[i].start;
+                            endInp.value = agent.shifts[i].end;
+                        }
+                    }
+                }
             }
         }
 
@@ -1563,16 +1641,27 @@
             const agent = State.agents.find(a => a.id === agentId);
             if (!agent) return;
 
-            const selectedDays = Array.from(document.querySelectorAll('input[name="workdays"]:checked')).map(cb => parseInt(cb.value));
-            const sStart = UI.shiftStart.value;
-            const sEnd = UI.shiftEnd.value;
+            const newShifts = {};
+            let hasAtLeastOneDay = false;
 
-            if (selectedDays.length === 0) {
-                notify("Please select at least one work day.");
+            for (let i = 0; i < 7; i++) {
+                const toggle = document.querySelector(`.day-toggle[data-day="${i}"]`);
+                if (toggle && toggle.checked) {
+                    const startInp = document.querySelector(`.time-input[data-day="${i}"][data-type="start"]`).value;
+                    const endInp = document.querySelector(`.time-input[data-day="${i}"][data-type="end"]`).value;
+                    if(startInp && endInp) {
+                        newShifts[i] = { start: startInp, end: endInp };
+                        hasAtLeastOneDay = true;
+                    }
+                }
+            }
+
+            if (!hasAtLeastOneDay) {
+                notify("Please configure at least one active day.");
                 return;
             }
 
-            agent.shift = { days: selectedDays, start: sStart, end: sEnd };
+            agent.shifts = newShifts;
             agent.lastAutoStatus = null; 
             
             State.commit();
@@ -1582,7 +1671,6 @@
             notify(`Shift schedule saved for ${agent.name}.`);
         }
 
-        // Modify Queue to ONLY include Support Agents
         function getNextAvailableAgentIndex(startIndex) {
             const total = State.agents.length;
             if (total === 0) return -1;
@@ -1627,7 +1715,6 @@
 
             currAgent.total++;
             
-            // Only advance the main round-robin queue if this wasn't a manual override
             if (!isOverride) {
                 const currIdx = State.agents.indexOf(currAgent);
                 State.queueIdx = getNextAvailableAgentIndex(currIdx + 1);
@@ -1636,7 +1723,7 @@
             logActivity(currAgent.name, `was assigned to ${shortTicket}`);
             
             UI.inputTicket.value = '';
-            UI.overrideAgentSelect.value = ''; // reset override
+            UI.overrideAgentSelect.value = ''; 
             State.commit();
             syncUI();
 
@@ -1681,7 +1768,6 @@
         }
 
         function processSkipQueue() {
-            // Cannot skip if override is selected, technically skipping applies to queue
             const overrideId = UI.overrideAgentSelect.value;
             if (overrideId) {
                 UI.overrideAgentSelect.value = '';
@@ -1765,7 +1851,6 @@
         function renderAssignQueue() {
             const nextIdx = getNextAvailableAgentIndex(State.queueIdx);
 
-            // Populate override dropdown (Only Support agents)
             const currentOverride = UI.overrideAgentSelect.value;
             UI.overrideAgentSelect.innerHTML = '<option value="">-- Let system choose next agent --</option>';
             State.agents.filter(a => a.role !== 'cse' && a.isAvailable).forEach(a => {
@@ -1780,7 +1865,6 @@
                 UI.agentStatusLabel.classList.add("offline");
                 UI.slackLinkIcon.classList.add("hidden");
                 
-                // Allow assignment if override is selected despite queue empty
                 const isOverridden = !!UI.overrideAgentSelect.value;
                 UI.btnAssign.disabled = !isOverridden; 
                 UI.btnAssignSlack.disabled = !isOverridden; 
@@ -1902,17 +1986,41 @@
             });
         }
 
+        // Helper to format shifts beautifully
+        function formatShifts(shiftsObj) {
+            if (!shiftsObj || Object.keys(shiftsObj).length === 0) return "<span style='color:var(--text-muted);'>No shifts configured</span>";
+            const mapDays = {0:'Su',1:'Mo',2:'Tu',3:'We',4:'Th',5:'Fr',6:'Sa'};
+            
+            // Group days by identical time ranges
+            const grouped = {}; 
+            for (let d = 0; d < 7; d++) {
+                if (shiftsObj[d]) {
+                    const timeStr = `${shiftsObj[d].start} - ${shiftsObj[d].end}`;
+                    if (!grouped[timeStr]) grouped[timeStr] = [];
+                    grouped[timeStr].push(d);
+                }
+            }
+            
+            let parts = [];
+            for (const [timeStr, daysArr] of Object.entries(grouped)) {
+                const dayNames = daysArr.map(d => mapDays[d]).join(', ');
+                parts.push(`<div style="margin-bottom: 6px; display:flex; align-items:center; justify-content:space-between; gap:1rem;">
+                    <span style="color:var(--text-muted); font-size:0.8rem;">${dayNames}</span> 
+                    <span class="badge-shift">${timeStr}</span>
+                </div>`);
+            }
+            return parts.join('');
+        }
+
         function renderShiftsTable() {
             UI.tableShifts.innerHTML = '';
-            const mapDays = {0:'Su',1:'Mo',2:'Tu',3:'We',4:'Th',5:'Fr',6:'Sa'};
             State.agents.forEach(a => {
-                if (a.shift) {
-                    const daysStr = a.shift.days.map(d => mapDays[d]).join(', ');
+                if (a.shifts && Object.keys(a.shifts).length > 0) {
+                    const formattedHtml = formatShifts(a.shifts);
                     UI.tableShifts.insertAdjacentHTML('beforeend', `
                         <tr>
-                            <td style="font-weight: 500;">${a.name}</td>
-                            <td style="color: var(--text-muted); font-size:0.8rem;">${daysStr}</td>
-                            <td><span class="badge">${a.shift.start} - ${a.shift.end}</span></td>
+                            <td style="font-weight: 600; vertical-align: top;">${a.name}</td>
+                            <td colspan="2">${formattedHtml}</td>
                         </tr>
                     `);
                 }
@@ -1975,15 +2083,13 @@
         function updateChart() {
             if(!loadChartInstance) return;
             
-            // Only chart active users or users with > 0 tickets today.
+            const displayAgents = State.agents; 
+            const chartWrapper = document.getElementById('chart-width-controller');
+            chartWrapper.style.minWidth = Math.max(100, displayAgents.length * 80) + 'px';
+
             const today = "2026-04-07"; 
             const todayCounts = {};
             State.tickets.forEach(t => { if (t.date === today) todayCounts[t.agentName] = (todayCounts[t.agentName] || 0) + 1; });
-
-            // Ensure graph dynamically adjusts to # of agents
-            const displayAgents = State.agents.filter(a => a.isAvailable || todayCounts[a.name] > 0); 
-            const chartWrapper = document.getElementById('chart-width-controller');
-            chartWrapper.style.minWidth = Math.max(100, displayAgents.length * 80) + 'px';
 
             loadChartInstance.data.labels = displayAgents.map(a => a.name);
             loadChartInstance.data.datasets[0].data = displayAgents.map(a => todayCounts[a.name] || 0);
