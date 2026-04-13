@@ -24,6 +24,7 @@
             --grad-blue: linear-gradient(135deg, #3b82f6, #4f46e5);
             --grad-pink: linear-gradient(135deg, #f43f5e, #db2777);
             --grad-brand: linear-gradient(135deg, #a855f7, #6366f1);
+            --grad-green: linear-gradient(135deg, #10b981, #059669);
             --shadow-glow: 0 0 20px rgba(99, 102, 241, 0.15);
             --shadow-drop: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
             --chart-bar: rgba(79, 70, 229, 0.8);
@@ -79,12 +80,14 @@
         .view-header-flex { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 2rem; flex-wrap: wrap; gap: 1rem;}
         .page-title h1 { font-size: 1.85rem; font-weight: 700; margin-bottom: 0.35rem; letter-spacing: -0.02em;}
         .page-title p { color: var(--text-muted); font-size: 0.95rem; }
-        .stat-cards { display: flex; gap: 1.5rem; }
-        .stat-card { border-radius: var(--radius-md); padding: 1.25rem 1.5rem; min-width: 180px; color: white; display: flex; flex-direction: column; box-shadow: var(--shadow-drop); }
+        .stat-cards { display: flex; gap: 1rem; flex-wrap: wrap; }
+        .stat-card { border-radius: var(--radius-md); padding: 1rem 1.25rem; min-width: 140px; flex: 1; color: white; display: flex; flex-direction: column; box-shadow: var(--shadow-drop); }
         .stat-card.blue { background: var(--grad-blue); }
         .stat-card.pink { background: var(--grad-pink); }
-        .stat-label { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; opacity: 0.9; margin-bottom: 0.5rem; }
-        .stat-value { font-size: 2rem; font-weight: 700; }
+        .stat-card.purple { background: var(--grad-brand); }
+        .stat-card.green { background: var(--grad-green); }
+        .stat-label { font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; opacity: 0.9; margin-bottom: 0.5rem; white-space: nowrap;}
+        .stat-value { font-size: 1.8rem; font-weight: 700; }
 
         /* --- DASHBOARD GRID & PANELS --- */
         .dashboard-grid { display: grid; grid-template-columns: 1fr 1.1fr; gap: 1.5rem; align-items: start; }
@@ -150,8 +153,8 @@
 
         /* --- CHART & ACTIVITY FEED --- */
         .chart-wrapper-overflow { overflow-x: auto; width: 100%; margin-bottom: 1.5rem; border-bottom: 1px solid var(--border-light); padding-bottom: 1.5rem;}
-        .chart-container { height: 180px; min-width: 100%; position: relative;}
-        .activity-feed { display: flex; flex-direction: column; gap: 1.2rem; max-height: 200px; overflow-y: auto; padding-right: 0.5rem; }
+        .chart-container { height: 200px; min-width: 100%; position: relative;}
+        .activity-feed { display: flex; flex-direction: column; gap: 1.2rem; max-height: 250px; overflow-y: auto; padding-right: 0.5rem; }
         .activity-item { display: flex; align-items: center; gap: 0.85rem; }
         .activity-avatar { width: 30px; height: 30px; border-radius: 50%; object-fit: cover;}
         .activity-text { flex: 1; font-size: 0.85rem; color: var(--text-muted); line-height: 1.4;}
@@ -172,7 +175,7 @@
         /* --- MODALS --- */
         .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(5px); z-index: 10000; display: flex; align-items: center; justify-content: center; opacity: 0; pointer-events: none; transition: opacity 0.3s; }
         .modal-overlay.active { opacity: 1; pointer-events: auto; }
-        .modal-content { background: var(--bg-panel); width: 100%; max-width: 450px; border-radius: var(--radius-lg); padding: 2rem; border: 1px solid var(--border-light); box-shadow: var(--shadow-drop); transform: translateY(20px); transition: transform 0.3s; }
+        .modal-content { background: var(--bg-panel); width: 100%; max-width: 450px; border-radius: var(--radius-lg); padding: 2rem; border: 1px solid var(--border-light); box-shadow: var(--shadow-drop); transform: translateY(20px); transition: transform 0.3s; max-height: 90vh; overflow-y:auto;}
         .modal-overlay.active .modal-content { transform: translateY(0); }
 
         /* --- VIEWS --- */
@@ -272,12 +275,20 @@
                         </div>
                         <div class="stat-cards">
                             <div class="stat-card blue">
-                                <span class="stat-label">Total Tickets Assigned</span>
+                                <span class="stat-label">Tickets Today</span>
                                 <span class="stat-value" id="stat-tickets">0</span>
                             </div>
                             <div class="stat-card pink">
-                                <span class="stat-label">Active Support Agents</span>
-                                <span class="stat-value" id="stat-agents">0</span>
+                                <span class="stat-label">Active Support</span>
+                                <span class="stat-value" id="stat-support">0</span>
+                            </div>
+                            <div class="stat-card purple">
+                                <span class="stat-label">Active CSEs</span>
+                                <span class="stat-value" id="stat-cse">0</span>
+                            </div>
+                            <div class="stat-card green">
+                                <span class="stat-label">Active CSMs</span>
+                                <span class="stat-value" id="stat-csm">0</span>
                             </div>
                         </div>
                     </div>
@@ -289,7 +300,7 @@
                                     <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"></path></svg>
                                     Assign Ticket
                                 </h2>
-                                <span class="badge" id="date-badge-1">YYYY-MM-DD</span>
+                                <span class="badge" id="date-badge-1"></span>
                             </div>
                             <div class="panel-body">
                                 
@@ -322,12 +333,12 @@
                                         <button type="submit" class="btn btn-primary" name="action" value="assign" id="btn-assign" disabled>Assign Ticket</button>
                                         <button type="submit" class="btn btn-purple" name="action" value="slack" id="btn-assign-slack" disabled>Sync & Slack</button>
                                     </div>
-                                    <button type="button" class="btn btn-outline" id="btn-skip" style="width: 100%;" disabled>Defer Assignment</button>
+                                    <button type="button" class="btn btn-outline" id="btn-skip" style="width: 100%;" disabled>Skip Assignment</button>
                                 </form>
 
                                 <hr class="divider">
 
-                                <h3 style="font-size: 0.8rem; text-transform: uppercase; color: var(--text-muted); margin-bottom: 1rem; letter-spacing: 0.05em;">Direct CSE Assignment (Onboarding)</h3>
+                                <h3 style="font-size: 0.8rem; text-transform: uppercase; color: var(--text-muted); margin-bottom: 1rem; letter-spacing: 0.05em;">Direct CSE Assignment</h3>
                                 <form id="form-cse-assign">
                                     <div class="input-group">
                                         <label>Select CSE Agent</label>
@@ -336,10 +347,33 @@
                                         </select>
                                     </div>
                                     <div class="input-group">
-                                        <label>Onboarding Ticket URL / ID</label>
+                                        <label>Ticket URL / ID</label>
                                         <input type="text" id="input-cse-ticket" class="input-control" placeholder="Ticket reference..." required autocomplete="off">
                                     </div>
-                                    <button type="submit" class="btn btn-primary" style="width: 100%; background: #0ea5e9;">Assign to CSE</button>
+                                    <div class="action-row" style="margin-bottom:0;">
+                                        <button type="submit" class="btn btn-primary" name="action" value="assign" style="background: #0ea5e9;">Assign to CSE</button>
+                                        <button type="submit" class="btn btn-purple" name="action" value="slack">Sync & Slack</button>
+                                    </div>
+                                </form>
+
+                                <hr class="divider">
+
+                                <h3 style="font-size: 0.8rem; text-transform: uppercase; color: var(--text-muted); margin-bottom: 1rem; letter-spacing: 0.05em;">Direct CSM Assignment</h3>
+                                <form id="form-csm-assign">
+                                    <div class="input-group">
+                                        <label>Select CSM Agent</label>
+                                        <select id="csm-agent-select" class="input-control" required>
+                                            <option value="">-- No CSM Available --</option>
+                                        </select>
+                                    </div>
+                                    <div class="input-group">
+                                        <label>Ticket URL / ID</label>
+                                        <input type="text" id="input-csm-ticket" class="input-control" placeholder="Ticket reference..." required autocomplete="off">
+                                    </div>
+                                    <div class="action-row" style="margin-bottom:0;">
+                                        <button type="submit" class="btn btn-primary" name="action" value="assign" style="background: #10b981;">Assign to CSM</button>
+                                        <button type="submit" class="btn btn-purple" name="action" value="slack">Sync & Slack</button>
+                                    </div>
                                 </form>
 
                             </div>
@@ -349,12 +383,22 @@
                             <div class="panel-header">
                                 <h2>
                                     <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M23 6l-9.5 9.5-5-5L1 18"></path><polyline points="16 6 23 6 23 13"></polyline></svg>
-                                    Today's Activity
+                                    Analytics & Activity
                                 </h2>
-                                <span class="badge" id="date-badge-2">YYYY-MM-DD</span>
+                                <select id="chart-range-select" class="input-control" style="width: auto; padding: 0.3rem 0.75rem; font-size: 0.8rem;">
+                                    <option value="today">Today</option>
+                                    <option value="7days">Last 7 Days</option>
+                                    <option value="30days">Last 30 Days</option>
+                                    <option value="custom">Custom Range</option>
+                                </select>
                             </div>
-                            <div class="panel-body" style="padding-top: 1rem;">
-                                <h3 style="font-size: 0.9rem; font-weight: 600; margin-bottom: 1rem; color: var(--text-muted);">Agent Ticket Load</h3>
+                            <div class="panel-body" style="padding-top: 0.5rem;">
+                                <div id="chart-custom-range" class="hidden" style="display:flex; gap:0.5rem; margin-bottom: 1rem; align-items:center;">
+                                    <input type="date" id="chart-start" class="input-control" style="padding: 0.3rem;"> 
+                                    <span style="color:var(--text-muted);">to</span> 
+                                    <input type="date" id="chart-end" class="input-control" style="padding: 0.3rem;">
+                                </div>
+
                                 <div class="chart-wrapper-overflow">
                                     <div class="chart-container" id="chart-width-controller">
                                         <canvas id="loadChart"></canvas>
@@ -374,7 +418,7 @@
                             <p>Audit logs and precise assignment filtering.</p>
                         </div>
                         <div class="stat-cards">
-                            <div class="stat-card blue">
+                            <div class="stat-card blue" style="min-width:auto;">
                                 <span class="stat-label">Tickets Found (Filtered)</span>
                                 <span class="stat-value" id="stat-filtered-tickets">0</span>
                             </div>
@@ -395,7 +439,7 @@
                                 <div class="data-controls" style="margin-left: auto;">
                                     <button class="btn btn-outline" id="btn-export-csv" style="padding: 0.4rem 1rem; font-size: 0.8rem;">Export CSV</button>
                                     <button class="btn btn-outline" id="btn-export-pdf" style="padding: 0.4rem 1rem; font-size: 0.8rem;">Export PDF</button>
-                                    <button class="btn btn-purple admin-only" id="btn-trigger-import" style="padding: 0.4rem 1rem; font-size: 0.8rem;">Import CSV</button>
+                                    <button class="btn btn-purple perm-manage-tickets" id="btn-trigger-import" style="padding: 0.4rem 1rem; font-size: 0.8rem;">Import CSV</button>
                                     <input type="file" id="input-csv-import" accept=".csv" class="hidden">
                                 </div>
                             </div>
@@ -408,7 +452,7 @@
                                         <th>Ticket Reference</th>
                                         <th>Date</th>
                                         <th>Timestamp</th>
-                                        <th class="admin-only" style="text-align: right;">Actions</th>
+                                        <th class="perm-manage-tickets" style="text-align: right;">Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody id="table-history"></tbody>
@@ -421,7 +465,7 @@
                     <div class="view-header-flex" style="margin-bottom: 1.5rem;">
                         <div class="page-title">
                             <h1>Manage Agents</h1>
-                            <p>Manage your active support and CSE team.</p>
+                            <p>Manage your active Support, CSE, and CSM team.</p>
                         </div>
                     </div>
 
@@ -440,6 +484,7 @@
                                         <select id="input-agent-role" class="input-control" required>
                                             <option value="support">Support Agent (Queue)</option>
                                             <option value="cse">Customer Success (CSE)</option>
+                                            <option value="csm">Customer Success Manager (CSM)</option>
                                         </select>
                                     </div>
                                     <div class="input-group">
@@ -555,7 +600,7 @@
                                     </div>
                                     
                                     <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 1.5rem; line-height: 1.4;">
-                                        * If the End Time is before Start Time (e.g. 21:00 to 06:00), the system automatically knows it's a Night Shift bridging into the next day.
+                                        * If the End Time is before Start Time, the system automatically knows it's a Night Shift.
                                     </div>
                                     <button type="submit" class="btn btn-primary" style="width: 100%;">Save Weekly Schedule</button>
                                 </form>
@@ -563,7 +608,13 @@
                         </div>
 
                         <div class="panel">
-                            <div class="panel-header"><h2>Current Schedules</h2></div>
+                            <div class="panel-header">
+                                <h2>Current Schedules</h2>
+                                <div class="data-controls">
+                                    <button class="btn btn-outline" id="btn-export-shifts-csv" style="padding: 0.3rem 0.8rem; font-size: 0.75rem;">Export CSV</button>
+                                    <button class="btn btn-outline" id="btn-export-shifts-pdf" style="padding: 0.3rem 0.8rem; font-size: 0.75rem;">Export PDF</button>
+                                </div>
+                            </div>
                             <div style="max-height: 500px; overflow-y: auto;">
                                 <table>
                                     <thead>
@@ -605,6 +656,7 @@
                                         <div class="checkbox-group">
                                             <label class="perm-check"><input type="checkbox" id="user-perm-agents"> Can Manage Agents</label>
                                             <label class="perm-check"><input type="checkbox" id="user-perm-shifts"> Can Manage Shift Timings</label>
+                                            <label class="perm-check"><input type="checkbox" id="user-perm-tickets"> Can Edit/Delete Tickets</label>
                                         </div>
                                     </div>
                                     <button type="submit" class="btn btn-primary" style="width: 100%;">Create Account</button>
@@ -687,6 +739,7 @@
                     <select id="edit-agent-role" class="input-control" required>
                         <option value="support">Support Agent (Queue)</option>
                         <option value="cse">Customer Success (CSE)</option>
+                        <option value="csm">Customer Success Manager (CSM)</option>
                     </select>
                 </div>
                 <div class="input-group">
@@ -738,6 +791,7 @@
                     <div class="checkbox-group">
                         <label class="perm-check"><input type="checkbox" id="edit-perm-agents"> Can Manage Agents</label>
                         <label class="perm-check"><input type="checkbox" id="edit-perm-shifts"> Can Manage Shift Timings</label>
+                        <label class="perm-check"><input type="checkbox" id="edit-perm-tickets"> Can Edit/Delete Tickets</label>
                     </div>
                 </div>
                 <div style="display: flex; gap: 1rem; margin-top: 2rem;">
@@ -812,14 +866,14 @@
         /** --- ENTERPRISE STATE MANAGEMENT --- **/
         const State = {
             users: [],
-            currentUser: JSON.parse(localStorage.getItem('ent_v13_currUser')) || null,
+            currentUser: JSON.parse(localStorage.getItem('ent_v14_currUser')) || null,
             agents: [],
             tickets: [],
             activities: [],
             queueIdx: 0,
             
             async commit() {
-                localStorage.setItem('ent_v13_currUser', JSON.stringify(this.currentUser));
+                localStorage.setItem('ent_v14_currUser', JSON.stringify(this.currentUser));
                 try {
                     await setDoc(docRef, {
                         users: this.users,
@@ -840,7 +894,7 @@
                 
                 State.users = (data.users || []).map(u => ({
                     ...u,
-                    permissions: u.permissions || { manageAgents: false, manageShifts: false }
+                    permissions: u.permissions || { manageAgents: false, manageShifts: false, manageTickets: false }
                 }));
                 
                 State.agents = (data.agents || []).map(a => {
@@ -875,7 +929,7 @@
                     email: 'revanth.abbati@dispatchtrack.com', 
                     password: 'Create@32', 
                     role: 'admin',
-                    permissions: { manageAgents: true, manageShifts: true }
+                    permissions: { manageAgents: true, manageShifts: true, manageTickets: true }
                 }];
                 State.commit().then(() => {
                     if (!window.appBooted) {
@@ -905,8 +959,11 @@
             adminElements: document.querySelectorAll('.admin-only'),
             manageAgentsElements: document.querySelectorAll('.perm-manage-agents'),
             manageShiftsElements: document.querySelectorAll('.perm-manage-shifts'),
+            manageTicketsElements: document.querySelectorAll('.perm-manage-tickets'),
 
-            statAgents: document.getElementById('stat-agents'),
+            statAgentsSupport: document.getElementById('stat-support'),
+            statAgentsCse: document.getElementById('stat-cse'),
+            statAgentsCsm: document.getElementById('stat-csm'),
             statTickets: document.getElementById('stat-tickets'),
             statFiltered: document.getElementById('stat-filtered-tickets'),
 
@@ -926,8 +983,19 @@
             cseAgentSelect: document.getElementById('cse-agent-select'),
             inputCseTicket: document.getElementById('input-cse-ticket'),
 
+            // CSM Form
+            formCsmAssign: document.getElementById('form-csm-assign'),
+            csmAgentSelect: document.getElementById('csm-agent-select'),
+            inputCsmTicket: document.getElementById('input-csm-ticket'),
+
             activityFeed: document.getElementById('activity-feed'),
             
+            // Dashboard Chart Tools
+            chartRangeSelect: document.getElementById('chart-range-select'),
+            chartCustomRangeBox: document.getElementById('chart-custom-range'),
+            chartStart: document.getElementById('chart-start'),
+            chartEnd: document.getElementById('chart-end'),
+
             // Filters
             filterAgent: document.getElementById('filter-agent'),
             filterDateStart: document.getElementById('filter-date-start'),
@@ -948,15 +1016,19 @@
             tableAgents: document.getElementById('table-agents'),
             rosterGrid: document.getElementById('roster-grid'),
 
+            // Shifts Tab
             shiftAgentSelect: document.getElementById('shift-agent-select'),
             formShift: document.getElementById('form-shift'),
             tableShifts: document.getElementById('table-shifts'),
+            btnExportShiftsCSV: document.getElementById('btn-export-shifts-csv'),
+            btnExportShiftsPDF: document.getElementById('btn-export-shifts-pdf'),
 
             formUser: document.getElementById('form-user'),
             inputUserEmail: document.getElementById('input-user-email'),
             inputUserPass: document.getElementById('input-user-pass'),
             inputPermAgents: document.getElementById('user-perm-agents'),
             inputPermShifts: document.getElementById('user-perm-shifts'),
+            inputPermTickets: document.getElementById('user-perm-tickets'),
             tableUsers: document.getElementById('table-users'),
 
             // Modals
@@ -988,6 +1060,7 @@
             editUserRole: document.getElementById('edit-user-role'),
             editPermAgents: document.getElementById('edit-perm-agents'),
             editPermShifts: document.getElementById('edit-perm-shifts'),
+            editPermTickets: document.getElementById('edit-perm-tickets'),
 
             modalResetPass: document.getElementById('modal-reset-pass'),
             formResetPass: document.getElementById('form-reset-pass'),
@@ -1110,11 +1183,24 @@
             
             UI.formAssign.addEventListener('submit', processTicketAssignment);
             UI.formCseAssign.addEventListener('submit', processCseAssignment);
+            UI.formCsmAssign.addEventListener('submit', processCsmAssignment);
             UI.btnSkip.addEventListener('click', processSkipQueue);
             
             UI.filterAgent.addEventListener('change', renderHistoryTable);
             UI.filterDateStart.addEventListener('change', renderHistoryTable);
             UI.filterDateEnd.addEventListener('change', renderHistoryTable);
+
+            // Chart Range Listeners
+            UI.chartRangeSelect.addEventListener('change', () => {
+                if (UI.chartRangeSelect.value === 'custom') {
+                    UI.chartCustomRangeBox.classList.remove('hidden');
+                } else {
+                    UI.chartCustomRangeBox.classList.add('hidden');
+                    updateChart();
+                }
+            });
+            UI.chartStart.addEventListener('change', updateChart);
+            UI.chartEnd.addEventListener('change', updateChart);
             
             UI.btnTheme.addEventListener('click', toggleTheme);
 
@@ -1146,6 +1232,10 @@
             UI.btnExportPDF.addEventListener('click', exportPDF);
             UI.btnTriggerImport.addEventListener('click', () => UI.inputCsvImport.click());
             UI.inputCsvImport.addEventListener('change', importCSV);
+
+            // Shift Exports
+            UI.btnExportShiftsCSV.addEventListener('click', exportShiftsCSV);
+            UI.btnExportShiftsPDF.addEventListener('click', exportShiftsPDF);
         }
 
         /** --- AUTHENTICATION & RBAC LOGIC --- **/
@@ -1186,10 +1276,12 @@
             const isAdmin = user.role === 'admin';
             const canManageAgents = isAdmin || (user.permissions && user.permissions.manageAgents);
             const canManageShifts = isAdmin || (user.permissions && user.permissions.manageShifts);
+            const canManageTickets = isAdmin || (user.permissions && user.permissions.manageTickets);
             
             UI.adminElements.forEach(el => el.classList.toggle('hidden', !isAdmin));
             UI.manageAgentsElements.forEach(el => el.classList.toggle('hidden', !canManageAgents));
             UI.manageShiftsElements.forEach(el => el.classList.toggle('hidden', !canManageShifts));
+            UI.manageTicketsElements.forEach(el => el.classList.toggle('hidden', !canManageTickets));
 
             if (!canManageAgents) {
                 UI.rosterGrid.style.gridTemplateColumns = "1fr";
@@ -1212,7 +1304,7 @@
             UI.modalDeleteTicket.classList.remove('active');
         };
 
-        /* Ticket Modals (Admin Only) */
+        /* Ticket Modals */
         window.openEditTicketModal = function(id) {
             const ticket = State.tickets.find(t => t.id === id);
             if (ticket) {
@@ -1343,6 +1435,7 @@
                 UI.editUserRole.value = user.role;
                 UI.editPermAgents.checked = user.permissions?.manageAgents || false;
                 UI.editPermShifts.checked = user.permissions?.manageShifts || false;
+                UI.editPermTickets.checked = user.permissions?.manageTickets || false;
                 UI.modalEditUser.classList.add('active');
             }
         };
@@ -1375,7 +1468,8 @@
                 user.role = UI.editUserRole.value;
                 user.permissions = {
                     manageAgents: UI.editPermAgents.checked,
-                    manageShifts: UI.editPermShifts.checked
+                    manageShifts: UI.editPermShifts.checked,
+                    manageTickets: UI.editPermTickets.checked
                 };
                 State.commit();
                 syncUI();
@@ -1535,6 +1629,75 @@
             UI.inputCsvImport.value = ''; 
         }
 
+        /** --- EXPORT SHIFTS DATA --- **/
+        function getShiftExportData() {
+            const mapDays = {0:'Sun',1:'Mon',2:'Tue',3:'Wed',4:'Thu',5:'Fri',6:'Sat'};
+            const data = [];
+            State.agents.forEach(a => {
+                if (a.shifts && Object.keys(a.shifts).length > 0) {
+                    let grouped = {};
+                    for (let d = 0; d < 7; d++) {
+                        if (a.shifts[d]) {
+                            const timeStr = `${a.shifts[d].start} - ${a.shifts[d].end}`;
+                            if (!grouped[timeStr]) grouped[timeStr] = [];
+                            grouped[timeStr].push(d);
+                        }
+                    }
+                    let shiftStrings = [];
+                    for (const [timeStr, daysArr] of Object.entries(grouped)) {
+                        const dayNames = daysArr.map(d => mapDays[d]).join(', ');
+                        shiftStrings.push(`${dayNames}: ${timeStr}`);
+                    }
+                    data.push({ name: a.name, shifts: shiftStrings.join(" | ") });
+                }
+            });
+            return data;
+        }
+
+        function exportShiftsCSV() {
+            const results = getShiftExportData();
+            if (results.length === 0) return notify("No shifts to export.");
+
+            let csvContent = "data:text/csv;charset=utf-8,Agent Name,Shift Breakdown\n";
+            results.forEach(r => { csvContent += `"${r.name}","${r.shifts}"\n`; });
+
+            const link = document.createElement("a");
+            link.setAttribute("href", encodeURI(csvContent));
+            link.setAttribute("download", `Shift_Timings_${new Date().toISOString().split('T')[0]}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            notify("Shifts CSV Exported");
+        }
+
+        function exportShiftsPDF() {
+            const results = getShiftExportData();
+            if (results.length === 0) return notify("No shifts to export.");
+
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF();
+            
+            doc.setFontSize(16);
+            doc.text("Agent Shift Timings", 14, 15);
+            doc.setFontSize(10);
+            doc.setTextColor(100);
+            doc.text(`Generated on: ${new Date().toLocaleDateString()}`, 14, 22);
+
+            const tableData = results.map(r => [r.name, r.shifts]);
+
+            doc.autoTable({
+                startY: 28,
+                head: [['Agent Name', 'Shift Breakdown']],
+                body: tableData,
+                theme: 'grid',
+                styles: { fontSize: 9, cellPadding: 3 },
+                headStyles: { fillColor: [79, 70, 229] } 
+            });
+
+            doc.save(`Shift_Timings_${new Date().toISOString().split('T')[0]}.pdf`);
+            notify("Shifts PDF Exported");
+        }
+
         /** --- CORE ACTIONS --- **/
         function processAddUser(e) {
             e.preventDefault();
@@ -1553,7 +1716,8 @@
                 role: 'user',
                 permissions: {
                     manageAgents: UI.inputPermAgents.checked,
-                    manageShifts: UI.inputPermShifts.checked
+                    manageShifts: UI.inputPermShifts.checked,
+                    manageTickets: UI.inputPermTickets.checked
                 }
             });
             State.commit();
@@ -1561,6 +1725,7 @@
             UI.inputUserPass.value = '';
             UI.inputPermAgents.checked = false;
             UI.inputPermShifts.checked = false;
+            UI.inputPermTickets.checked = false;
             renderUsersTable();
             notify("New user account created.");
         }
@@ -1670,9 +1835,19 @@
             for (let i = 0; i < total; i++) {
                 const idx = (startIndex + i) % total;
                 const ag = State.agents[idx];
-                if (ag.isAvailable && ag.role !== 'cse') return idx;
+                if (ag.isAvailable && ag.role === 'support') return idx;
             }
             return -1;
+        }
+
+        function handleSlackRedirect(action, agent) {
+            if (action === 'slack') {
+                const slackUrl = agent.slackUrl || 'https://app.slack.com/client/T22B28XU1';
+                window.open(slackUrl, '_blank');
+                notify(`Logged & redirected to Slack`);
+                return true;
+            }
+            return false;
         }
 
         function processTicketAssignment(e) {
@@ -1719,17 +1894,14 @@
             State.commit();
             syncUI();
 
-            if (action === 'slack') {
-                const slackUrl = currAgent.slackUrl || 'https://app.slack.com/client/T22B28XU1';
-                window.open(slackUrl, '_blank');
-                notify(`Logged & redirected to Slack`);
-            } else {
+            if (!handleSlackRedirect(action, currAgent)) {
                 notify(`Assigned to ${currAgent.name}`);
             }
         }
 
         function processCseAssignment(e) {
             e.preventDefault();
+            const action = e.submitter ? e.submitter.value : 'assign';
             const link = UI.inputCseTicket.value.trim();
             const agentId = UI.cseAgentSelect.value;
 
@@ -1750,13 +1922,49 @@
             });
 
             currAgent.total++;
-            
             logActivity(currAgent.name, `was assigned CSE onboarding ${shortTicket}`);
             
             UI.inputCseTicket.value = '';
             State.commit();
             syncUI();
-            notify(`Assigned onboarding to ${currAgent.name}`);
+            
+            if (!handleSlackRedirect(action, currAgent)) {
+                notify(`Assigned onboarding to ${currAgent.name}`);
+            }
+        }
+
+        function processCsmAssignment(e) {
+            e.preventDefault();
+            const action = e.submitter ? e.submitter.value : 'assign';
+            const link = UI.inputCsmTicket.value.trim();
+            const agentId = UI.csmAgentSelect.value;
+
+            if (!agentId) return notify("No CSM agent selected.");
+
+            const currAgent = State.agents.find(a => a.id === agentId);
+            if(!currAgent) return;
+
+            const shortTicket = link.split('/').pop().substring(0, 8) || 'CSM Ticket';
+
+            State.tickets.push({
+                id: crypto.randomUUID(),
+                agentId: currAgent.id,
+                agentName: currAgent.name,
+                link: link,
+                date: new Date().toISOString().split('T')[0], 
+                time: getFormattedTime()
+            });
+
+            currAgent.total++;
+            logActivity(currAgent.name, `was assigned CSM ticket ${shortTicket}`);
+            
+            UI.inputCsmTicket.value = '';
+            State.commit();
+            syncUI();
+            
+            if (!handleSlackRedirect(action, currAgent)) {
+                notify(`Assigned to CSM ${currAgent.name}`);
+            }
         }
 
         function processSkipQueue() {
@@ -1776,9 +1984,9 @@
             
             const nextAgent = State.agents[nextIdx];
             if (skippedAgent.id !== nextAgent.id) {
-                logActivity(skippedAgent.name, `deferred ticket to ${nextAgent.name}`);
+                logActivity(skippedAgent.name, `skipped ticket to ${nextAgent.name}`);
             } else {
-                logActivity(skippedAgent.name, `deferred ticket, but no others available.`);
+                logActivity(skippedAgent.name, `skipped ticket, but no others available.`);
             }
 
             State.commit();
@@ -1817,12 +2025,21 @@
 
         /** --- RENDER ENGINE --- **/
         function syncUI() {
-            const activeCount = State.agents.filter(a => a.isAvailable).length;
-            UI.statAgents.innerText = activeCount;
-            UI.statTickets.innerText = State.tickets.length;
+            // Update Stat Cards dynamically
+            const todayDate = new Date().toISOString().split('T')[0];
+            const ticketsToday = State.tickets.filter(t => t.date === todayDate).length;
+            
+            const activeSupportCount = State.agents.filter(a => a.isAvailable && a.role === 'support').length;
+            const activeCseCount = State.agents.filter(a => a.isAvailable && a.role === 'cse').length;
+            const activeCsmCount = State.agents.filter(a => a.isAvailable && a.role === 'csm').length;
+            
+            UI.statTickets.innerText = ticketsToday;
+            UI.statAgentsSupport.innerText = activeSupportCount;
+            UI.statAgentsCse.innerText = activeCseCount;
+            UI.statAgentsCsm.innerText = activeCsmCount;
             
             renderAssignQueue();
-            populateCseDropdown();
+            populateAssignmentDropdowns();
             updateChart();
             renderActivityFeed();
             renderAgentTable();
@@ -1840,19 +2057,43 @@
             UI.shiftAgentSelect.value = currShiftSel;
         }
 
+        function populateAssignmentDropdowns() {
+            // CSE
+            const currentCseSel = UI.cseAgentSelect.value;
+            UI.cseAgentSelect.innerHTML = '<option value="">-- Select Available CSE --</option>';
+            const availableCses = State.agents.filter(a => a.role === 'cse' && a.isAvailable);
+            if (availableCses.length === 0) {
+                UI.cseAgentSelect.innerHTML = '<option value="">-- No CSE Available --</option>';
+            } else {
+                availableCses.forEach(a => { UI.cseAgentSelect.insertAdjacentHTML('beforeend', `<option value="${a.id}">${a.name}</option>`); });
+            }
+            UI.cseAgentSelect.value = currentCseSel;
+
+            // CSM
+            const currentCsmSel = UI.csmAgentSelect.value;
+            UI.csmAgentSelect.innerHTML = '<option value="">-- Select Available CSM --</option>';
+            const availableCsms = State.agents.filter(a => a.role === 'csm' && a.isAvailable);
+            if (availableCsms.length === 0) {
+                UI.csmAgentSelect.innerHTML = '<option value="">-- No CSM Available --</option>';
+            } else {
+                availableCsms.forEach(a => { UI.csmAgentSelect.insertAdjacentHTML('beforeend', `<option value="${a.id}">${a.name}</option>`); });
+            }
+            UI.csmAgentSelect.value = currentCsmSel;
+        }
+
         function renderAssignQueue() {
             const nextIdx = getNextAvailableAgentIndex(State.queueIdx);
 
             const currentOverride = UI.overrideAgentSelect.value;
             UI.overrideAgentSelect.innerHTML = '<option value="">-- Let system choose next agent --</option>';
-            State.agents.filter(a => a.role !== 'cse' && a.isAvailable).forEach(a => {
+            State.agents.filter(a => a.role === 'support' && a.isAvailable).forEach(a => {
                 UI.overrideAgentSelect.insertAdjacentHTML('beforeend', `<option value="${a.id}">${a.name}</option>`);
             });
             UI.overrideAgentSelect.value = currentOverride;
 
             if (nextIdx === -1) {
                 UI.displayNext.innerText = `No Support Agents Available`;
-                UI.agentAvatar.src = `https://ui-avatars.com/api/?name=QA&background=7e22ce&color=fff`;
+                UI.agentAvatar.src = `https://ui-avatars.com/api/?name=QA&background=272838&color=fff`;
                 UI.agentStatusLabel.innerText = "Queue Halted";
                 UI.agentStatusLabel.classList.add("offline");
                 UI.slackLinkIcon.classList.add("hidden");
@@ -1880,21 +2121,6 @@
             }
         }
 
-        function populateCseDropdown() {
-            const currentSel = UI.cseAgentSelect.value;
-            UI.cseAgentSelect.innerHTML = '<option value="">-- Select Available CSE --</option>';
-            
-            const availableCses = State.agents.filter(a => a.role === 'cse' && a.isAvailable);
-            if (availableCses.length === 0) {
-                UI.cseAgentSelect.innerHTML = '<option value="">-- No CSE Available --</option>';
-            } else {
-                availableCses.forEach(a => { 
-                    UI.cseAgentSelect.insertAdjacentHTML('beforeend', `<option value="${a.id}">${a.name}</option>`); 
-                });
-            }
-            UI.cseAgentSelect.value = currentSel;
-        }
-
         function renderActivityFeed() {
             UI.activityFeed.innerHTML = '';
             if (State.activities.length === 0) return UI.activityFeed.innerHTML = `<div style="color: var(--text-muted); font-size: 0.85rem;">No recent activity.</div>`;
@@ -1915,7 +2141,10 @@
 
             State.agents.forEach(a => {
                 const avatar = getAgentAvatarUrl(a);
-                const roleBadge = a.role === 'cse' ? '<span class="badge badge-role">CSE</span>' : '<span class="badge badge-role" style="background:rgba(59, 130, 246, 0.15); color:#3b82f6;">Support</span>';
+                let roleBadge = '';
+                if(a.role === 'cse') roleBadge = '<span class="badge badge-role">CSE</span>';
+                else if(a.role === 'csm') roleBadge = '<span class="badge badge-role" style="background:rgba(126, 34, 206, 0.15); color:#7e22ce;">CSM</span>';
+                else roleBadge = '<span class="badge badge-role" style="background:rgba(59, 130, 246, 0.15); color:#3b82f6;">Support</span>';
                 
                 let actionHtml = '';
                 if (canManageAgents) {
@@ -1957,6 +2186,7 @@
                 if (u.role === 'user' && u.permissions) {
                     if (u.permissions.manageAgents) permBadges += `<span class="badge badge-perm">Agents</span>`;
                     if (u.permissions.manageShifts) permBadges += `<span class="badge badge-perm">Shifts</span>`;
+                    if (u.permissions.manageTickets) permBadges += `<span class="badge badge-perm" style="color: #4f46e5; background:rgba(79, 70, 229, 0.15);">Tickets</span>`;
                 }
 
                 const isSelf = State.currentUser.id === u.id;
@@ -1978,12 +2208,10 @@
             });
         }
 
-        // Helper to format shifts beautifully
         function formatShifts(shiftsObj) {
             if (!shiftsObj || Object.keys(shiftsObj).length === 0) return "<span style='color:var(--text-muted);'>No shifts configured</span>";
             const mapDays = {0:'Su',1:'Mo',2:'Tu',3:'We',4:'Th',5:'Fr',6:'Sa'};
             
-            // Group days by identical time ranges
             const grouped = {}; 
             for (let d = 0; d < 7; d++) {
                 if (shiftsObj[d]) {
@@ -2034,13 +2262,14 @@
 
             if (results.length === 0) return UI.tableHistory.innerHTML = `<tr><td colspan="5" style="text-align:center; color: var(--text-muted); padding: 2rem;">No logs match criteria.</td></tr>`;
 
-            const isAdmin = State.currentUser && State.currentUser.role === 'admin';
+            const user = State.currentUser;
+            const canManageTickets = user && (user.role === 'admin' || (user.permissions && user.permissions.manageTickets));
 
             results.slice().reverse().forEach(t => {
                 let actionHtml = '';
-                if (isAdmin) {
+                if (canManageTickets) {
                     actionHtml = `
-                    <td class="admin-only" style="text-align: right;">
+                    <td class="admin-only perm-manage-tickets" style="text-align: right;">
                         <button class="btn-icon" title="Edit Ticket" onclick="window.openEditTicketModal('${t.id}')"><svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg></button>
                         <button class="btn-icon danger" title="Delete Ticket" onclick="window.openDeleteTicketModal('${t.id}')"><svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg></button>
                     </td>`;
@@ -2072,19 +2301,45 @@
             });
         }
 
+        function getChartDateRange() {
+            const selection = UI.chartRangeSelect.value;
+            const today = new Date();
+            let start = new Date();
+            let end = new Date();
+
+            if (selection === 'today') {
+                // Keep as today
+            } else if (selection === '7days') {
+                start.setDate(today.getDate() - 7);
+            } else if (selection === '30days') {
+                start.setDate(today.getDate() - 30);
+            } else if (selection === 'custom') {
+                if (UI.chartStart.value) start = new Date(UI.chartStart.value);
+                if (UI.chartEnd.value) end = new Date(UI.chartEnd.value);
+            }
+
+            return { start: start.toISOString().split('T')[0], end: end.toISOString().split('T')[0] };
+        }
+
         function updateChart() {
             if(!loadChartInstance) return;
             
-            const todayDate = new Date().toISOString().split('T')[0];
-            const todayCounts = {};
-            State.tickets.forEach(t => { if (t.date === todayDate) todayCounts[t.agentName] = (todayCounts[t.agentName] || 0) + 1; });
+            const range = getChartDateRange();
+            const rangeCounts = {};
+            
+            State.tickets.forEach(t => { 
+                if (t.date >= range.start && t.date <= range.end) {
+                    rangeCounts[t.agentName] = (rangeCounts[t.agentName] || 0) + 1; 
+                }
+            });
 
-            const displayAgents = State.agents.filter(a => a.isAvailable || todayCounts[a.name] > 0); 
+            // Ensure graph dynamically adjusts to # of agents
+            const displayAgents = State.agents.filter(a => a.isAvailable || rangeCounts[a.name] > 0); 
             const chartWrapper = document.getElementById('chart-width-controller');
             chartWrapper.style.minWidth = Math.max(100, displayAgents.length * 80) + 'px';
 
             loadChartInstance.data.labels = displayAgents.map(a => a.name);
-            loadChartInstance.data.datasets[0].data = displayAgents.map(a => todayCounts[a.name] || 0);
+            loadChartInstance.data.datasets[0].data = displayAgents.map(a => rangeCounts[a.name] || 0);
             loadChartInstance.update();
         }
 
@@ -2099,6 +2354,11 @@
             clickedNav.classList.add('active');
             UI.views.forEach(v => v.classList.remove('active'));
             document.getElementById(clickedNav.dataset.target).classList.add('active');
+            
+            // Re-render chart dynamically when navigating back to dashboard to ensure width computation
+            if(clickedNav.dataset.target === 'view-assign') {
+                updateChart();
+            }
         }
 
         function notify(message) {
