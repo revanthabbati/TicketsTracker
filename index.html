@@ -851,6 +851,8 @@
 
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
+        
+        // Crucial: Pointing directly to your original data document
         const docRef = doc(db, "routerpro", "system_state");
 
         // Helper Function for clean AM/PM times
@@ -892,7 +894,21 @@
             if (snapshot.exists()) {
                 const data = snapshot.data();
                 
-                State.users = (data.users || []).map(u => ({
+                // DATA RECOVERY: Force create Master Admin if users array is empty in original db
+                let dbUsers = data.users || [];
+                if (dbUsers.length === 0) {
+                    dbUsers = [{ 
+                        id: 'admin-1', 
+                        email: 'revanth.abbati@dispatchtrack.com', 
+                        password: 'Create@32', 
+                        role: 'admin',
+                        permissions: { manageAgents: true, manageShifts: true, manageTickets: true }
+                    }];
+                    State.users = dbUsers;
+                    State.commit();
+                }
+
+                State.users = dbUsers.map(u => ({
                     ...u,
                     permissions: u.permissions || { manageAgents: false, manageShifts: false, manageTickets: false }
                 }));
@@ -1246,10 +1262,11 @@
 
         function handleLogin(e) {
             e.preventDefault();
-            const email = UI.loginEmail.value.trim();
+            // Forced to lowercase to prevent case-sensitive email lockouts
+            const email = UI.loginEmail.value.trim().toLowerCase(); 
             const pass = UI.loginPass.value.trim();
 
-            const user = State.users.find(u => u.email === email && u.password === pass);
+            const user = State.users.find(u => u.email.toLowerCase() === email && u.password === pass);
             if (user) {
                 State.currentUser = user;
                 State.commit();
@@ -2025,7 +2042,6 @@
 
         /** --- RENDER ENGINE --- **/
         function syncUI() {
-            // Update Stat Cards dynamically
             const todayDate = new Date().toISOString().split('T')[0];
             const ticketsToday = State.tickets.filter(t => t.date === todayDate).length;
             
@@ -2058,7 +2074,6 @@
         }
 
         function populateAssignmentDropdowns() {
-            // CSE
             const currentCseSel = UI.cseAgentSelect.value;
             UI.cseAgentSelect.innerHTML = '<option value="">-- Select Available CSE --</option>';
             const availableCses = State.agents.filter(a => a.role === 'cse' && a.isAvailable);
@@ -2069,7 +2084,6 @@
             }
             UI.cseAgentSelect.value = currentCseSel;
 
-            // CSM
             const currentCsmSel = UI.csmAgentSelect.value;
             UI.csmAgentSelect.innerHTML = '<option value="">-- Select Available CSM --</option>';
             const availableCsms = State.agents.filter(a => a.role === 'csm' && a.isAvailable);
@@ -2269,7 +2283,7 @@
                 let actionHtml = '';
                 if (canManageTickets) {
                     actionHtml = `
-                    <td class="admin-only perm-manage-tickets" style="text-align: right;">
+                    <td class="perm-manage-tickets" style="text-align: right;">
                         <button class="btn-icon" title="Edit Ticket" onclick="window.openEditTicketModal('${t.id}')"><svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg></button>
                         <button class="btn-icon danger" title="Delete Ticket" onclick="window.openDeleteTicketModal('${t.id}')"><svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg></button>
                     </td>`;
@@ -2333,7 +2347,6 @@
                 }
             });
 
-            // Ensure graph dynamically adjusts to # of agents
             const displayAgents = State.agents.filter(a => a.isAvailable || rangeCounts[a.name] > 0); 
             const chartWrapper = document.getElementById('chart-width-controller');
             chartWrapper.style.minWidth = Math.max(100, displayAgents.length * 80) + 'px';
@@ -2355,7 +2368,6 @@
             UI.views.forEach(v => v.classList.remove('active'));
             document.getElementById(clickedNav.dataset.target).classList.add('active');
             
-            // Re-render chart dynamically when navigating back to dashboard to ensure width computation
             if(clickedNav.dataset.target === 'view-assign') {
                 updateChart();
             }
