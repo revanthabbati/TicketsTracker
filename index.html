@@ -815,7 +815,7 @@
         </div>
     </div>
 
-    <script type="module">
+   <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
         import { getFirestore, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 
@@ -825,15 +825,14 @@
             projectId: "routerpro-bbf42",
             storageBucket: "routerpro-bbf42.firebasestorage.app",
             messagingSenderId: "960264510058",
-            appId: "1:960264510058:web:6e6b99eb1358f43189c813",
-            measurementId: "G-SKDHRKYNXG"
+            appId: "1:960264510058:web:6e6b99eb1358f43189c813"
         };
 
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
         
-        // Pointing directly to your original data document
-        const docRef = doc(db, "routerpro", "system_state");
+        // POINTING DIRECTLY TO YOUR BACKUP
+        const docRef = doc(db, "routerpro", "system_state_v11");
 
         function getFormattedTime() {
             return new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }).toLowerCase();
@@ -869,10 +868,12 @@
         };
 
         onSnapshot(docRef, (snapshot) => {
-            document.getElementById('loading-screen').classList.add('hidden');
+            const loader = document.getElementById('loading-screen');
+            if (loader) loader.classList.add('hidden');
+            
             const data = snapshot.exists() ? snapshot.data() : { users: [], agents: [], tickets: [], activities: [], queueIdx: 0 };
             
-            // 1. SAFEGUARD: Load all your precious data FIRST
+            // 1. SAFEGUARD: Load all data FIRST
             State.agents = (data.agents || []).map(a => {
                 let newShifts = a.shifts || {};
                 if (a.shift && Object.keys(newShifts).length === 0) {
@@ -884,22 +885,26 @@
             State.activities = data.activities || [];
             State.queueIdx = data.queueIdx || 0;
             
-            // 2. NOW check for the admin user
-            let dbUsers = data.users || [];
-            if (dbUsers.length === 0) {
-                dbUsers = [{ 
+            // 2. Load Users Safely
+            let loadedUsers = data.users || [];
+            if (loadedUsers.length === 0) {
+                loadedUsers = [{ 
                     id: 'admin-1', email: 'revanth.abbati@dispatchtrack.com', password: 'Create@32', role: 'admin',
                     permissions: { manageAgents: true, manageShifts: true, manageTickets: true }
                 }];
-                State.users = dbUsers;
+                State.users = loadedUsers;
                 State.commit(); 
             } else {
-                State.users = dbUsers.map(u => ({ ...u, permissions: u.permissions || { manageAgents: false, manageShifts: false, manageTickets: false } }));
+                State.users = loadedUsers.map(u => ({ ...u, permissions: u.permissions || { manageAgents: false, manageShifts: false, manageTickets: false } }));
             }
             
             // Proceed to boot if ready
-            if (!window.appBooted) { bootApp(); window.appBooted = true; }
-            else { syncUI(); }
+            if (!window.appBooted) { 
+                bootApp(); 
+                window.appBooted = true; 
+            } else if (State.currentUser) { 
+                syncUI(); 
+            }
         });
 
         let loadChartInstance = null;
