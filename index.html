@@ -853,7 +853,7 @@
         const db = getFirestore(app);
         
         // Pointing directly to your original data document
-        const docRef = doc(db, "routerpro", "system_state_v12");
+        const docRef = doc(db, "routerpro", "system_state");
 
         function getFormattedTime() {
             return new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }).toLowerCase();
