@@ -890,72 +890,32 @@
             }
         };
 
-        onSnapshot(docRef, (snapshot) => {
-            if (snapshot.exists()) {
-                const data = snapshot.data();
-                
-                // DATA RECOVERY: Force create Master Admin if users array is empty in original db
-                let dbUsers = data.users || [];
-                if (dbUsers.length === 0) {
-                    dbUsers = [{ 
-                        id: 'admin-1', 
-                        email: 'revanth.abbati@dispatchtrack.com', 
-                        password: 'Create@32', 
-                        role: 'admin',
-                        permissions: { manageAgents: true, manageShifts: true, manageTickets: true }
-                    }];
-                    State.users = dbUsers;
-                    State.commit();
-                }
-
-                State.users = dbUsers.map(u => ({
-                    ...u,
-                    permissions: u.permissions || { manageAgents: false, manageShifts: false, manageTickets: false }
-                }));
-                
-                State.agents = (data.agents || []).map(a => {
-                    let newShifts = a.shifts || {};
-                    if (a.shift && Object.keys(newShifts).length === 0) {
-                        a.shift.days.forEach(d => {
-                            newShifts[d] = { start: a.shift.start, end: a.shift.end };
-                        });
-                    }
-
-                    return {
-                        ...a,
-                        isAvailable: typeof a.isAvailable !== 'undefined' ? a.isAvailable : true,
-                        role: a.role || 'support',
-                        shifts: newShifts
-                    };
-                });
-
-                State.tickets = data.tickets || [];
-                State.activities = data.activities || [];
-                State.queueIdx = data.queueIdx || 0;
-                
-                if (!window.appBooted) {
-                    bootApp();
-                    window.appBooted = true;
-                } else if (State.currentUser) {
-                    syncUI(); 
-                }
-            } else {
-                State.users = [{ 
-                    id: 'admin-1', 
-                    email: 'revanth.abbati@dispatchtrack.com', 
-                    password: 'Create@32', 
-                    role: 'admin',
-                    permissions: { manageAgents: true, manageShifts: true, manageTickets: true }
-                }];
-                State.commit().then(() => {
-                    if (!window.appBooted) {
-                        bootApp();
-                        window.appBooted = true;
-                    }
-                });
-            }
-        });
-
+       onSnapshot(docRef, (snapshot) => {
+    document.getElementById('loading-screen').classList.add('hidden');
+    const data = snapshot.exists() ? snapshot.data() : { users: [], agents: [], tickets: [], activities: [], queueIdx: 0 };
+    
+    // Force Admin if missing
+    let dbUsers = data.users || [];
+    if (dbUsers.length === 0) {
+        dbUsers = [{ 
+            id: 'admin-1', email: 'revanth.abbati@dispatchtrack.com', password: 'Create@32', role: 'admin',
+            permissions: { manageAgents: true, manageShifts: true, manageTickets: true }
+        }];
+        State.users = dbUsers;
+        State.commit();
+    } else {
+        State.users = dbUsers;
+    }
+    
+    State.agents = data.agents || [];
+    State.tickets = data.tickets || [];
+    State.activities = data.activities || [];
+    State.queueIdx = data.queueIdx || 0;
+    
+    // Proceed to boot if ready
+    if (!window.appBooted) { bootApp(); window.appBooted = true; }
+    else { syncUI(); }
+});
         let loadChartInstance = null;
 
         /** --- DOM BINDINGS --- **/
