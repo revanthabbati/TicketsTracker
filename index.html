@@ -59,6 +59,7 @@
         .content-area { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 2.5rem 3.5rem 5rem 3.5rem; }
 
         /* --- LOGIN SCREEN --- */
+        #loading-screen { position: fixed; inset: 0; background: #0f1016; display: flex; align-items: center; justify-content: center; color: white; z-index: 99999; font-weight: 600; font-size: 1.2rem; }
         .login-wrapper { position: fixed; inset: 0; background: var(--bg-base); z-index: 9999; display: flex; align-items: center; justify-content: center; flex-direction: column; }
         .login-card { background: var(--bg-panel); border: 1px solid var(--border-light); padding: 3rem; border-radius: var(--radius-lg); width: 100%; max-width: 400px; box-shadow: var(--shadow-drop); text-align: center; }
         .login-brand { display: inline-flex; align-items: center; justify-content: center; width: 56px; height: 56px; background: var(--grad-brand); border-radius: 14px; margin-bottom: 1.5rem; box-shadow: var(--shadow-glow); }
@@ -200,7 +201,9 @@
 </head>
 <body>
 
-    <div id="login-screen" class="login-wrapper">
+    <div id="loading-screen">Connecting to Database...</div>
+
+    <div id="login-screen" class="login-wrapper hidden">
         <div class="login-card">
             <div class="login-brand">
                 <svg width="28" height="28" fill="none" stroke="#fff" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
@@ -836,9 +839,6 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
         import { getFirestore, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 
-        // =================================================================================
-        // FIREBASE CONFIGURATION
-        // =================================================================================
         const firebaseConfig = {
             apiKey: "AIzaSyBmlL7onUcn8Cne3DsBM72gbskWihq7i5Y",
             authDomain: "routerpro-bbf42.firebaseapp.com",
@@ -852,10 +852,9 @@
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
         
-        // Crucial: Pointing directly to your original data document
+        // Pointing directly to your original data document
         const docRef = doc(db, "routerpro", "system_state_v11");
 
-        // Helper Function for clean AM/PM times
         function getFormattedTime() {
             return new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }).toLowerCase();
         }
@@ -865,7 +864,6 @@
             return `https://ui-avatars.com/api/?name=${encodeURIComponent(agent.name)}&background=1e1e2d&color=94a3b8&size=64`;
         }
 
-        /** --- ENTERPRISE STATE MANAGEMENT --- **/
         const State = {
             users: [],
             currentUser: JSON.parse(localStorage.getItem('ent_v14_currUser')) || null,
@@ -890,54 +888,58 @@
             }
         };
 
-       onSnapshot(docRef, (snapshot) => {
-    document.getElementById('loading-screen').classList.add('hidden');
-   const data = snapshot.data();
-                
-                // DATA RECOVERY: Force create Master Admin if users array is empty
-                let dbUsers = data.users || [];
-                if (dbUsers.length === 0) {
-                    dbUsers = [{ 
-                        id: 'admin-1', 
-                        email: 'revanth.abbati@dispatchtrack.com', 
-                        password: 'Create@32', 
-                        role: 'admin',
-                        permissions: { manageAgents: true, manageShifts: true, manageTickets: true }
-                    }];
-                    State.users = dbUsers;
-                    State.commit(); // This permanently saves the admin to your v11 database
-                }
-
+        onSnapshot(docRef, (snapshot) => {
+            document.getElementById('loading-screen').classList.add('hidden');
+            const data = snapshot.exists() ? snapshot.data() : { users: [], agents: [], tickets: [], activities: [], queueIdx: 0 };
+            
+            let dbUsers = data.users || [];
+            if (dbUsers.length === 0) {
+                dbUsers = [{ 
+                    id: 'admin-1', 
+                    email: 'revanth.abbati@dispatchtrack.com', 
+                    password: 'Create@32', 
+                    role: 'admin',
+                    permissions: { manageAgents: true, manageShifts: true, manageTickets: true }
+                }];
+                State.users = dbUsers;
+                State.commit(); 
+            } else {
                 State.users = dbUsers.map(u => ({
                     ...u,
                     permissions: u.permissions || { manageAgents: false, manageShifts: false, manageTickets: false }
                 }));
-    
-    // Force Admin if missing
-    let dbUsers = data.users || [];
-    if (dbUsers.length === 0) {
-        dbUsers = [{ 
-            id: 'admin-1', email: 'revanth.abbati@dispatchtrack.com', password: 'Create@32', role: 'admin',
-            permissions: { manageAgents: true, manageShifts: true, manageTickets: true }
-        }];
-        State.users = dbUsers;
-        State.commit();
-    } else {
-        State.users = dbUsers;
-    }
-    
-    State.agents = data.agents || [];
-    State.tickets = data.tickets || [];
-    State.activities = data.activities || [];
-    State.queueIdx = data.queueIdx || 0;
-    
-    // Proceed to boot if ready
-    if (!window.appBooted) { bootApp(); window.appBooted = true; }
-    else { syncUI(); }
-});
+            }
+            
+            State.agents = (data.agents || []).map(a => {
+                let newShifts = a.shifts || {};
+                if (a.shift && Object.keys(newShifts).length === 0) {
+                    a.shift.days.forEach(d => {
+                        newShifts[d] = { start: a.shift.start, end: a.shift.end };
+                    });
+                }
+
+                return {
+                    ...a,
+                    isAvailable: typeof a.isAvailable !== 'undefined' ? a.isAvailable : true,
+                    role: a.role || 'support',
+                    shifts: newShifts
+                };
+            });
+
+            State.tickets = data.tickets || [];
+            State.activities = data.activities || [];
+            State.queueIdx = data.queueIdx || 0;
+            
+            if (!window.appBooted) { 
+                bootApp(); 
+                window.appBooted = true; 
+            } else if (State.currentUser) { 
+                syncUI(); 
+            }
+        });
+
         let loadChartInstance = null;
 
-        /** --- DOM BINDINGS --- **/
         const UI = {
             loginScreen: document.getElementById('login-screen'),
             appContainer: document.getElementById('app-container'),
@@ -973,31 +975,26 @@
             btnAssignSlack: document.getElementById('btn-assign-slack'),
             btnSkip: document.getElementById('btn-skip'),
 
-            // CSE Form
             formCseAssign: document.getElementById('form-cse-assign'),
             cseAgentSelect: document.getElementById('cse-agent-select'),
             inputCseTicket: document.getElementById('input-cse-ticket'),
 
-            // CSM Form
             formCsmAssign: document.getElementById('form-csm-assign'),
             csmAgentSelect: document.getElementById('csm-agent-select'),
             inputCsmTicket: document.getElementById('input-csm-ticket'),
 
             activityFeed: document.getElementById('activity-feed'),
             
-            // Dashboard Chart Tools
             chartRangeSelect: document.getElementById('chart-range-select'),
             chartCustomRangeBox: document.getElementById('chart-custom-range'),
             chartStart: document.getElementById('chart-start'),
             chartEnd: document.getElementById('chart-end'),
 
-            // Filters
             filterAgent: document.getElementById('filter-agent'),
             filterDateStart: document.getElementById('filter-date-start'),
             filterDateEnd: document.getElementById('filter-date-end'),
             tableHistory: document.getElementById('table-history'),
             
-            // Export / Import
             btnExportCSV: document.getElementById('btn-export-csv'),
             btnExportPDF: document.getElementById('btn-export-pdf'),
             btnTriggerImport: document.getElementById('btn-trigger-import'),
@@ -1011,7 +1008,6 @@
             tableAgents: document.getElementById('table-agents'),
             rosterGrid: document.getElementById('roster-grid'),
 
-            // Shifts Tab
             shiftAgentSelect: document.getElementById('shift-agent-select'),
             formShift: document.getElementById('form-shift'),
             tableShifts: document.getElementById('table-shifts'),
@@ -1026,7 +1022,6 @@
             inputPermTickets: document.getElementById('user-perm-tickets'),
             tableUsers: document.getElementById('table-users'),
 
-            // Modals
             modalEditTicket: document.getElementById('modal-edit-ticket'),
             formEditTicket: document.getElementById('form-edit-ticket'),
             editTicketId: document.getElementById('edit-ticket-id'),
@@ -1088,7 +1083,6 @@
             }
         };
 
-        /** --- AUTOMATED SHIFT CRON ENGINE (DAY-SPECIFIC) --- **/
         function evaluateAgentShifts() {
             if (State.agents.length === 0) return;
             const now = new Date();
@@ -1145,12 +1139,12 @@
         }
         setInterval(evaluateAgentShifts, 60000);
 
-        /** --- BOOT SEQUENCE --- **/
         function bootApp() {
             document.documentElement.setAttribute('data-theme', localStorage.getItem('ent_v10_theme') || 'dark');
             
             const today = new Date().toISOString().split('T')[0];
-            document.getElementById('date-badge-1').innerText = today;
+            const dateBadge1 = document.getElementById('date-badge-1');
+            if(dateBadge1) dateBadge1.innerText = today;
             
             UI.filterDateStart.value = today;
             UI.filterDateEnd.value = today;
@@ -1184,7 +1178,6 @@
             UI.filterDateStart.addEventListener('change', renderHistoryTable);
             UI.filterDateEnd.addEventListener('change', renderHistoryTable);
 
-            // Chart Range Listeners
             UI.chartRangeSelect.addEventListener('change', () => {
                 if (UI.chartRangeSelect.value === 'custom') {
                     UI.chartCustomRangeBox.classList.remove('hidden');
@@ -1221,18 +1214,15 @@
                 });
             });
 
-            // Export/Import Listeners
             UI.btnExportCSV.addEventListener('click', exportCSV);
             UI.btnExportPDF.addEventListener('click', exportPDF);
             UI.btnTriggerImport.addEventListener('click', () => UI.inputCsvImport.click());
             UI.inputCsvImport.addEventListener('change', importCSV);
 
-            // Shift Exports
             UI.btnExportShiftsCSV.addEventListener('click', exportShiftsCSV);
             UI.btnExportShiftsPDF.addEventListener('click', exportShiftsPDF);
         }
 
-        /** --- AUTHENTICATION & RBAC LOGIC --- **/
         function showLogin() {
             UI.loginScreen.classList.remove('hidden');
             UI.appContainer.classList.add('hidden');
@@ -1240,8 +1230,7 @@
 
         function handleLogin(e) {
             e.preventDefault();
-            // Forced to lowercase to prevent case-sensitive email lockouts
-            const email = UI.loginEmail.value.trim().toLowerCase();
+            const email = UI.loginEmail.value.trim().toLowerCase(); 
             const pass = UI.loginPass.value.trim();
 
             const user = State.users.find(u => u.email.toLowerCase() === email && u.password === pass);
@@ -1288,7 +1277,6 @@
             syncUI();
         }
 
-        /** --- MODAL LOGIC --- **/
         window.closeModals = function() {
             UI.modalEditAgent.classList.remove('active');
             UI.modalDeleteAgent.classList.remove('active');
@@ -1299,7 +1287,6 @@
             UI.modalDeleteTicket.classList.remove('active');
         };
 
-        /* Ticket Modals */
         window.openEditTicketModal = function(id) {
             const ticket = State.tickets.find(t => t.id === id);
             if (ticket) {
@@ -1343,7 +1330,7 @@
                     ticket.agentId = newAgent.id;
                     ticket.agentName = newAgent.name;
                     
-                    logActivity(newAgent.name, `ticket was reassigned to them by admin.`);
+                    logActivity(newAgent.name, `ticket was reassigned to them by system.`);
                 }
                 
                 ticket.link = newUrl;
@@ -1372,7 +1359,6 @@
             }
         };
 
-        /* Agent Modals */
         window.openEditModal = function(id) {
             const agent = State.agents.find(a => a.id === id);
             if (agent) {
@@ -1421,7 +1407,6 @@
             notify("Agent removed from roster.");
         };
 
-        /* User Modals */
         window.openEditUserModal = function(id) {
             const user = State.users.find(u => u.id === id);
             if (user) {
@@ -1494,8 +1479,6 @@
             notify("User permanently deleted.");
         };
 
-
-        /** --- DATA EXPORT & IMPORT --- **/
         function getFilteredTickets() {
             const fAgent = UI.filterAgent.value;
             const fStart = UI.filterDateStart.value;
@@ -1511,60 +1494,36 @@
 
         function exportCSV() {
             const results = getFilteredTickets();
-            if (results.length === 0) {
-                notify("No records to export for this range.");
-                return;
-            }
+            if (results.length === 0) { return notify("No records to export."); }
 
-            let csvContent = "data:text/csv;charset=utf-8,";
-            csvContent += "Assignee,Ticket Reference,Date,Timestamp\n";
-            
-            results.forEach(t => {
-                csvContent += `"${t.agentName}","${t.link}","${t.date}","${t.time}"\n`;
-            });
+            let csvContent = "data:text/csv;charset=utf-8,Assignee,Ticket Reference,Date,Timestamp\n";
+            results.forEach(t => { csvContent += `"${t.agentName}","${t.link}","${t.date}","${t.time}"\n`; });
 
-            const encodedUri = encodeURI(csvContent);
             const link = document.createElement("a");
-            link.setAttribute("href", encodedUri);
+            link.setAttribute("href", encodeURI(csvContent));
             link.setAttribute("download", `Assignment_Tracker_Export_${new Date().toISOString().split('T')[0]}.csv`);
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
-            
             notify("CSV Exported Successfully");
         }
 
         function exportPDF() {
             const results = getFilteredTickets();
-            if (results.length === 0) {
-                notify("No records to export for this range.");
-                return;
-            }
+            if (results.length === 0) { return notify("No records to export."); }
 
             const { jsPDF } = window.jspdf;
             const doc = new jsPDF();
-            
             doc.setFontSize(16);
             doc.text("Tickets Assignment History", 14, 15);
-            
             doc.setFontSize(10);
             doc.setTextColor(100);
-            
             const fStart = UI.filterDateStart.value || 'Beginning';
             const fEnd = UI.filterDateEnd.value || 'Today';
             doc.text(`Date Range: ${fStart} to ${fEnd}`, 14, 22);
 
             const tableData = results.map(t => [t.agentName, t.link, t.date, t.time]);
-
-            doc.autoTable({
-                startY: 28,
-                head: [['Assignee', 'Ticket Reference', 'Date', 'Timestamp']],
-                body: tableData,
-                theme: 'grid',
-                styles: { fontSize: 8, cellPadding: 3 },
-                headStyles: { fillColor: [79, 70, 229] } 
-            });
-
+            doc.autoTable({ startY: 28, head: [['Assignee', 'Ticket Reference', 'Date', 'Timestamp']], body: tableData, theme: 'grid', styles: { fontSize: 8, cellPadding: 3 }, headStyles: { fillColor: [79, 70, 229] } });
             doc.save(`Assignment_Tracker_Report_${new Date().toISOString().split('T')[0]}.pdf`);
             notify("PDF Exported Successfully");
         }
@@ -1584,7 +1543,6 @@
                     if(!row) continue;
 
                     const cols = row.match(/(".*?"|[^",\s]+)(?=\s*,|\s*$)/g);
-                    
                     if(cols && cols.length >= 4) {
                         const name = cols[0].replace(/"/g, '').trim();
                         const link = cols[1].replace(/"/g, '').trim();
@@ -1593,38 +1551,23 @@
                         
                         const agent = State.agents.find(a => a.name.toLowerCase() === name.toLowerCase());
                         const agentId = agent ? agent.id : 'imported-agent';
-
                         const isDuplicate = State.tickets.some(t => t.link === link && t.date === date && t.time === time);
                         
                         if (!isDuplicate) {
-                            State.tickets.push({
-                                id: crypto.randomUUID(),
-                                agentId: agentId,
-                                agentName: name,
-                                link: link,
-                                date: date,
-                                time: time
-                            });
+                            State.tickets.push({ id: crypto.randomUUID(), agentId: agentId, agentName: name, link: link, date: date, time: time });
                             if (agent) agent.total++;
                             importedCount++;
                         }
                     }
                 }
-                
                 State.commit();
                 syncUI();
-                if(importedCount > 0) {
-                    notify(`Imported ${importedCount} historic tickets successfully.`);
-                } else {
-                    notify(`No new tickets found to import.`);
-                }
+                notify(importedCount > 0 ? `Imported ${importedCount} historic tickets.` : `No new tickets found to import.`);
             };
-            
             reader.readAsText(file);
             UI.inputCsvImport.value = ''; 
         }
 
-        /** --- EXPORT SHIFTS DATA --- **/
         function getShiftExportData() {
             const mapDays = {0:'Sun',1:'Mon',2:'Tue',3:'Wed',4:'Thu',5:'Fri',6:'Sat'};
             const data = [];
@@ -1652,10 +1595,8 @@
         function exportShiftsCSV() {
             const results = getShiftExportData();
             if (results.length === 0) return notify("No shifts to export.");
-
             let csvContent = "data:text/csv;charset=utf-8,Agent Name,Shift Breakdown\n";
             results.forEach(r => { csvContent += `"${r.name}","${r.shifts}"\n`; });
-
             const link = document.createElement("a");
             link.setAttribute("href", encodeURI(csvContent));
             link.setAttribute("download", `Shift_Timings_${new Date().toISOString().split('T')[0]}.csv`);
@@ -1668,59 +1609,31 @@
         function exportShiftsPDF() {
             const results = getShiftExportData();
             if (results.length === 0) return notify("No shifts to export.");
-
             const { jsPDF } = window.jspdf;
             const doc = new jsPDF();
-            
             doc.setFontSize(16);
             doc.text("Agent Shift Timings", 14, 15);
             doc.setFontSize(10);
             doc.setTextColor(100);
             doc.text(`Generated on: ${new Date().toLocaleDateString()}`, 14, 22);
-
             const tableData = results.map(r => [r.name, r.shifts]);
-
-            doc.autoTable({
-                startY: 28,
-                head: [['Agent Name', 'Shift Breakdown']],
-                body: tableData,
-                theme: 'grid',
-                styles: { fontSize: 9, cellPadding: 3 },
-                headStyles: { fillColor: [79, 70, 229] } 
-            });
-
+            doc.autoTable({ startY: 28, head: [['Agent Name', 'Shift Breakdown']], body: tableData, theme: 'grid', styles: { fontSize: 9, cellPadding: 3 }, headStyles: { fillColor: [79, 70, 229] } });
             doc.save(`Shift_Timings_${new Date().toISOString().split('T')[0]}.pdf`);
             notify("Shifts PDF Exported");
         }
 
-        /** --- CORE ACTIONS --- **/
         function processAddUser(e) {
             e.preventDefault();
             const email = UI.inputUserEmail.value.trim();
             const pass = UI.inputUserPass.value.trim();
-            
-            if (State.users.some(u => u.email === email)) {
-                notify("A user with this email already exists.");
-                return;
-            }
+            if (State.users.some(u => u.email === email)) return notify("A user with this email already exists.");
 
             State.users.push({ 
-                id: crypto.randomUUID(), 
-                email: email, 
-                password: pass, 
-                role: 'user',
-                permissions: {
-                    manageAgents: UI.inputPermAgents.checked,
-                    manageShifts: UI.inputPermShifts.checked,
-                    manageTickets: UI.inputPermTickets.checked
-                }
+                id: crypto.randomUUID(), email: email, password: pass, role: 'user',
+                permissions: { manageAgents: UI.inputPermAgents.checked, manageShifts: UI.inputPermShifts.checked, manageTickets: UI.inputPermTickets.checked }
             });
             State.commit();
-            UI.inputUserEmail.value = '';
-            UI.inputUserPass.value = '';
-            UI.inputPermAgents.checked = false;
-            UI.inputPermShifts.checked = false;
-            UI.inputPermTickets.checked = false;
+            UI.inputUserEmail.value = ''; UI.inputUserPass.value = ''; UI.inputPermAgents.checked = false; UI.inputPermShifts.checked = false; UI.inputPermTickets.checked = false;
             renderUsersTable();
             notify("New user account created.");
         }
@@ -1733,19 +1646,8 @@
             const slack = UI.inputAgentSlack.value.trim();
 
             if (name) {
-                State.agents.push({ 
-                    id: crypto.randomUUID(), 
-                    name: name, 
-                    role: role,
-                    profilePic: pic,
-                    slackUrl: slack,
-                    total: 0, 
-                    isAvailable: true,
-                    shifts: {} 
-                });
-                UI.inputAgent.value = '';
-                UI.inputAgentPic.value = '';
-                UI.inputAgentSlack.value = '';
+                State.agents.push({ id: crypto.randomUUID(), name: name, role: role, profilePic: pic, slackUrl: slack, total: 0, isAvailable: true, shifts: {} });
+                UI.inputAgent.value = ''; UI.inputAgentPic.value = ''; UI.inputAgentSlack.value = '';
                 logActivity(name, `joined the active Agent List.`);
                 State.commit();
                 syncUI();
@@ -1755,19 +1657,12 @@
 
         function handleShiftAgentSelect() {
             const agentId = UI.shiftAgentSelect.value;
-            if (!agentId) {
-                UI.formShift.classList.add('hidden');
-                return;
-            }
-
+            if (!agentId) { UI.formShift.classList.add('hidden'); return; }
             const agent = State.agents.find(a => a.id === agentId);
             UI.formShift.classList.remove('hidden');
             
             document.querySelectorAll('.day-toggle').forEach(cb => cb.checked = false);
-            document.querySelectorAll('.time-input').forEach(inp => {
-                inp.disabled = true;
-                inp.value = '';
-            });
+            document.querySelectorAll('.time-input').forEach(inp => { inp.disabled = true; inp.value = ''; });
 
             if (agent && agent.shifts) {
                 for (let i = 0; i < 7; i++) {
@@ -1777,10 +1672,8 @@
                             toggle.checked = true;
                             const startInp = document.querySelector(`.time-input[data-day="${i}"][data-type="start"]`);
                             const endInp = document.querySelector(`.time-input[data-day="${i}"][data-type="end"]`);
-                            startInp.disabled = false;
-                            endInp.disabled = false;
-                            startInp.value = agent.shifts[i].start;
-                            endInp.value = agent.shifts[i].end;
+                            startInp.disabled = false; endInp.disabled = false;
+                            startInp.value = agent.shifts[i].start; endInp.value = agent.shifts[i].end;
                         }
                     }
                 }
@@ -1795,38 +1688,27 @@
 
             const newShifts = {};
             let hasAtLeastOneDay = false;
-
             for (let i = 0; i < 7; i++) {
                 const toggle = document.querySelector(`.day-toggle[data-day="${i}"]`);
                 if (toggle && toggle.checked) {
                     const startInp = document.querySelector(`.time-input[data-day="${i}"][data-type="start"]`).value;
                     const endInp = document.querySelector(`.time-input[data-day="${i}"][data-type="end"]`).value;
-                    if(startInp && endInp) {
-                        newShifts[i] = { start: startInp, end: endInp };
-                        hasAtLeastOneDay = true;
-                    }
+                    if(startInp && endInp) { newShifts[i] = { start: startInp, end: endInp }; hasAtLeastOneDay = true; }
                 }
             }
 
-            if (!hasAtLeastOneDay) {
-                notify("Please configure at least one active day.");
-                return;
-            }
-
+            if (!hasAtLeastOneDay) return notify("Please configure at least one active day.");
             agent.shifts = newShifts;
             agent.lastAutoStatus = null; 
-            
             State.commit();
             evaluateAgentShifts(); 
             syncUI();
-            
             notify(`Shift schedule saved for ${agent.name}.`);
         }
 
         function getNextAvailableAgentIndex(startIndex) {
             const total = State.agents.length;
             if (total === 0) return -1;
-            
             for (let i = 0; i < total; i++) {
                 const idx = (startIndex + i) % total;
                 const ag = State.agents[idx];
@@ -1850,7 +1732,6 @@
             const action = e.submitter ? e.submitter.value : 'assign';
             const link = UI.inputTicket.value.trim();
             const overrideId = UI.overrideAgentSelect.value;
-
             let currAgent;
             let isOverride = false;
 
@@ -1865,16 +1746,7 @@
             }
 
             const shortTicket = link.split('/').pop().substring(0, 8) || 'Ticket';
-
-            State.tickets.push({
-                id: crypto.randomUUID(),
-                agentId: currAgent.id,
-                agentName: currAgent.name,
-                link: link,
-                date: new Date().toISOString().split('T')[0], 
-                time: getFormattedTime()
-            });
-
+            State.tickets.push({ id: crypto.randomUUID(), agentId: currAgent.id, agentName: currAgent.name, link: link, date: new Date().toISOString().split('T')[0], time: getFormattedTime() });
             currAgent.total++;
             
             if (!isOverride) {
@@ -1883,15 +1755,10 @@
             }
             
             logActivity(currAgent.name, `was assigned to ${shortTicket}`);
-            
-            UI.inputTicket.value = '';
-            UI.overrideAgentSelect.value = ''; 
+            UI.inputTicket.value = ''; UI.overrideAgentSelect.value = ''; 
             State.commit();
             syncUI();
-
-            if (!handleSlackRedirect(action, currAgent)) {
-                notify(`Assigned to ${currAgent.name}`);
-            }
+            if (!handleSlackRedirect(action, currAgent)) notify(`Assigned to ${currAgent.name}`);
         }
 
         function processCseAssignment(e) {
@@ -1901,31 +1768,18 @@
             const agentId = UI.cseAgentSelect.value;
 
             if (!agentId) return notify("No CSE agent selected.");
-
             const currAgent = State.agents.find(a => a.id === agentId);
             if(!currAgent) return;
 
             const shortTicket = link.split('/').pop().substring(0, 8) || 'Onboarding';
-
-            State.tickets.push({
-                id: crypto.randomUUID(),
-                agentId: currAgent.id,
-                agentName: currAgent.name,
-                link: link,
-                date: new Date().toISOString().split('T')[0], 
-                time: getFormattedTime()
-            });
-
+            State.tickets.push({ id: crypto.randomUUID(), agentId: currAgent.id, agentName: currAgent.name, link: link, date: new Date().toISOString().split('T')[0], time: getFormattedTime() });
             currAgent.total++;
-            logActivity(currAgent.name, `was assigned CSE onboarding ${shortTicket}`);
             
+            logActivity(currAgent.name, `was assigned CSE onboarding ${shortTicket}`);
             UI.inputCseTicket.value = '';
             State.commit();
             syncUI();
-            
-            if (!handleSlackRedirect(action, currAgent)) {
-                notify(`Assigned onboarding to ${currAgent.name}`);
-            }
+            if (!handleSlackRedirect(action, currAgent)) notify(`Assigned onboarding to ${currAgent.name}`);
         }
 
         function processCsmAssignment(e) {
@@ -1935,31 +1789,18 @@
             const agentId = UI.csmAgentSelect.value;
 
             if (!agentId) return notify("No CSM agent selected.");
-
             const currAgent = State.agents.find(a => a.id === agentId);
             if(!currAgent) return;
 
             const shortTicket = link.split('/').pop().substring(0, 8) || 'CSM Ticket';
-
-            State.tickets.push({
-                id: crypto.randomUUID(),
-                agentId: currAgent.id,
-                agentName: currAgent.name,
-                link: link,
-                date: new Date().toISOString().split('T')[0], 
-                time: getFormattedTime()
-            });
-
+            State.tickets.push({ id: crypto.randomUUID(), agentId: currAgent.id, agentName: currAgent.name, link: link, date: new Date().toISOString().split('T')[0], time: getFormattedTime() });
             currAgent.total++;
-            logActivity(currAgent.name, `was assigned CSM ticket ${shortTicket}`);
             
+            logActivity(currAgent.name, `was assigned CSM ticket ${shortTicket}`);
             UI.inputCsmTicket.value = '';
             State.commit();
             syncUI();
-            
-            if (!handleSlackRedirect(action, currAgent)) {
-                notify(`Assigned to CSM ${currAgent.name}`);
-            }
+            if (!handleSlackRedirect(action, currAgent)) notify(`Assigned to CSM ${currAgent.name}`);
         }
 
         function processSkipQueue() {
@@ -1972,17 +1813,13 @@
 
             const currIdx = getNextAvailableAgentIndex(State.queueIdx);
             if (currIdx === -1) return;
-
             const skippedAgent = State.agents[currIdx];
             const nextIdx = getNextAvailableAgentIndex(currIdx + 1);
             State.queueIdx = nextIdx;
             
             const nextAgent = State.agents[nextIdx];
-            if (skippedAgent.id !== nextAgent.id) {
-                logActivity(skippedAgent.name, `skipped ticket to ${nextAgent.name}`);
-            } else {
-                logActivity(skippedAgent.name, `skipped ticket, but no others available.`);
-            }
+            if (skippedAgent.id !== nextAgent.id) logActivity(skippedAgent.name, `skipped ticket to ${nextAgent.name}`);
+            else logActivity(skippedAgent.name, `skipped ticket, but no others available.`);
 
             State.commit();
             syncUI();
@@ -2004,11 +1841,7 @@
 
         function logActivity(agentName, text) {
             const userInitiator = State.currentUser ? State.currentUser.email.split('@')[0] : 'System';
-            State.activities.unshift({
-                agentName,
-                text: `<strong>[${agentName}]</strong> ${text} <span style="font-size: 0.75rem; opacity:0.6;">(by ${userInitiator})</span>`,
-                time: getFormattedTime()
-            });
+            State.activities.unshift({ agentName, text: `<strong>[${agentName}]</strong> ${text} <span style="font-size: 0.75rem; opacity:0.6;">(by ${userInitiator})</span>`, time: getFormattedTime() });
         }
 
         function toggleTheme() {
@@ -2022,15 +1855,14 @@
         function syncUI() {
             const todayDate = new Date().toISOString().split('T')[0];
             const ticketsToday = State.tickets.filter(t => t.date === todayDate).length;
-            
             const activeSupportCount = State.agents.filter(a => a.isAvailable && a.role === 'support').length;
             const activeCseCount = State.agents.filter(a => a.isAvailable && a.role === 'cse').length;
             const activeCsmCount = State.agents.filter(a => a.isAvailable && a.role === 'csm').length;
             
-            UI.statTickets.innerText = ticketsToday;
-            UI.statAgentsSupport.innerText = activeSupportCount;
-            UI.statAgentsCse.innerText = activeCseCount;
-            UI.statAgentsCsm.innerText = activeCsmCount;
+            if(UI.statTickets) UI.statTickets.innerText = ticketsToday;
+            if(UI.statAgentsSupport) UI.statAgentsSupport.innerText = activeSupportCount;
+            if(UI.statAgentsCse) UI.statAgentsCse.innerText = activeCseCount;
+            if(UI.statAgentsCsm) UI.statAgentsCsm.innerText = activeCsmCount;
             
             renderAssignQueue();
             populateAssignmentDropdowns();
@@ -2041,9 +1873,7 @@
             renderHistoryTable(); 
             renderShiftsTable();
             
-            if(State.currentUser && State.currentUser.role === 'admin') {
-                renderUsersTable();
-            }
+            if(State.currentUser && State.currentUser.role === 'admin') renderUsersTable();
 
             const currShiftSel = UI.shiftAgentSelect.value;
             UI.shiftAgentSelect.innerHTML = '<option value="">-- Choose an Agent --</option>';
@@ -2055,32 +1885,23 @@
             const currentCseSel = UI.cseAgentSelect.value;
             UI.cseAgentSelect.innerHTML = '<option value="">-- Select Available CSE --</option>';
             const availableCses = State.agents.filter(a => a.role === 'cse' && a.isAvailable);
-            if (availableCses.length === 0) {
-                UI.cseAgentSelect.innerHTML = '<option value="">-- No CSE Available --</option>';
-            } else {
-                availableCses.forEach(a => { UI.cseAgentSelect.insertAdjacentHTML('beforeend', `<option value="${a.id}">${a.name}</option>`); });
-            }
+            if (availableCses.length === 0) UI.cseAgentSelect.innerHTML = '<option value="">-- No CSE Available --</option>';
+            else availableCses.forEach(a => { UI.cseAgentSelect.insertAdjacentHTML('beforeend', `<option value="${a.id}">${a.name}</option>`); });
             UI.cseAgentSelect.value = currentCseSel;
 
             const currentCsmSel = UI.csmAgentSelect.value;
             UI.csmAgentSelect.innerHTML = '<option value="">-- Select Available CSM --</option>';
             const availableCsms = State.agents.filter(a => a.role === 'csm' && a.isAvailable);
-            if (availableCsms.length === 0) {
-                UI.csmAgentSelect.innerHTML = '<option value="">-- No CSM Available --</option>';
-            } else {
-                availableCsms.forEach(a => { UI.csmAgentSelect.insertAdjacentHTML('beforeend', `<option value="${a.id}">${a.name}</option>`); });
-            }
+            if (availableCsms.length === 0) UI.csmAgentSelect.innerHTML = '<option value="">-- No CSM Available --</option>';
+            else availableCsms.forEach(a => { UI.csmAgentSelect.insertAdjacentHTML('beforeend', `<option value="${a.id}">${a.name}</option>`); });
             UI.csmAgentSelect.value = currentCsmSel;
         }
 
         function renderAssignQueue() {
             const nextIdx = getNextAvailableAgentIndex(State.queueIdx);
-
             const currentOverride = UI.overrideAgentSelect.value;
             UI.overrideAgentSelect.innerHTML = '<option value="">-- Let system choose next agent --</option>';
-            State.agents.filter(a => a.role === 'support' && a.isAvailable).forEach(a => {
-                UI.overrideAgentSelect.insertAdjacentHTML('beforeend', `<option value="${a.id}">${a.name}</option>`);
-            });
+            State.agents.filter(a => a.role === 'support' && a.isAvailable).forEach(a => { UI.overrideAgentSelect.insertAdjacentHTML('beforeend', `<option value="${a.id}">${a.name}</option>`); });
             UI.overrideAgentSelect.value = currentOverride;
 
             if (nextIdx === -1) {
@@ -2091,9 +1912,7 @@
                 UI.slackLinkIcon.classList.add("hidden");
                 
                 const isOverridden = !!UI.overrideAgentSelect.value;
-                UI.btnAssign.disabled = !isOverridden; 
-                UI.btnAssignSlack.disabled = !isOverridden; 
-                UI.btnSkip.disabled = true;
+                UI.btnAssign.disabled = !isOverridden; UI.btnAssignSlack.disabled = !isOverridden; UI.btnSkip.disabled = true;
             } else {
                 State.queueIdx = nextIdx;
                 const agent = State.agents[nextIdx];
@@ -2102,12 +1921,8 @@
                 UI.agentStatusLabel.innerText = "Up Next In Queue";
                 UI.agentStatusLabel.classList.remove("offline");
 
-                if(agent.slackUrl) {
-                    UI.slackLinkIcon.href = agent.slackUrl;
-                    UI.slackLinkIcon.classList.remove("hidden");
-                } else {
-                    UI.slackLinkIcon.classList.add("hidden");
-                }
+                if(agent.slackUrl) { UI.slackLinkIcon.href = agent.slackUrl; UI.slackLinkIcon.classList.remove("hidden"); } 
+                else { UI.slackLinkIcon.classList.add("hidden"); }
 
                 UI.btnAssign.disabled = false; UI.btnAssignSlack.disabled = false; UI.btnSkip.disabled = false;
             }
@@ -2119,7 +1934,6 @@
             State.activities.slice(0, 15).forEach(act => {
                 const agentObj = State.agents.find(a => a.name === act.agentName);
                 const avatar = agentObj ? getAgentAvatarUrl(agentObj) : `https://ui-avatars.com/api/?name=${encodeURIComponent(act.agentName)}&background=1e1e2d&color=94a3b8&size=64`;
-                
                 UI.activityFeed.insertAdjacentHTML('beforeend', `<div class="activity-item"><img src="${avatar}" class="activity-avatar"><div class="activity-text">${act.text}</div><div class="activity-time">${act.time}</div></div>`);
             });
         }
@@ -2149,19 +1963,8 @@
 
                 UI.tableAgents.insertAdjacentHTML('beforeend', `
                     <tr>
-                        <td style="display:flex; align-items:center; gap: 0.75rem;">
-                            <img src="${avatar}" style="width:28px; height:28px; border-radius:50%; border: 1px solid var(--border-light); object-fit:cover;">
-                            <div>
-                                <div style="font-weight: 600; opacity: ${a.isAvailable ? '1' : '0.5'};">${a.name}</div>
-                                ${roleBadge}
-                            </div>
-                        </td>
-                        <td>
-                            <label class="switch">
-                                <input type="checkbox" class="agent-toggle" data-id="${a.id}" ${a.isAvailable ? 'checked' : ''}>
-                                <span class="slider"></span>
-                            </label>
-                        </td>
+                        <td style="display:flex; align-items:center; gap: 0.75rem;"><img src="${avatar}" style="width:28px; height:28px; border-radius:50%; border: 1px solid var(--border-light); object-fit:cover;"><div><div style="font-weight: 600; opacity: ${a.isAvailable ? '1' : '0.5'};">${a.name}</div>${roleBadge}</div></td>
+                        <td><label class="switch"><input type="checkbox" class="agent-toggle" data-id="${a.id}" ${a.isAvailable ? 'checked' : ''}><span class="slider"></span></label></td>
                         <td><span class="badge" style="opacity: ${a.isAvailable ? '1' : '0.5'};">${a.total} Tickets</span></td>
                         ${actionHtml}
                     </tr>
@@ -2173,7 +1976,6 @@
             UI.tableUsers.innerHTML = '';
             State.users.forEach(u => {
                 const roleBadge = u.role === 'admin' ? `<span class="badge" style="color: #f43f5e; background: rgba(244, 63, 94, 0.15)">Admin</span>` : `<span class="badge">User</span>`;
-                
                 let permBadges = '';
                 if (u.role === 'user' && u.permissions) {
                     if (u.permissions.manageAgents) permBadges += `<span class="badge badge-perm">Agents</span>`;
@@ -2186,24 +1988,13 @@
                     `<button class="btn-icon" disabled style="opacity:0.3"><svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg></button>` :
                     `<button class="btn-icon danger" title="Delete User" onclick="window.openDeleteUserModal('${u.id}')"><svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg></button>`;
 
-                UI.tableUsers.insertAdjacentHTML('beforeend', `
-                    <tr>
-                        <td style="font-weight: 500;">${u.email}</td>
-                        <td>${roleBadge} ${permBadges}</td>
-                        <td style="text-align: right;">
-                            <button class="btn-icon" title="Edit User" onclick="window.openEditUserModal('${u.id}')"><svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg></button>
-                            <button class="btn-icon" title="Reset Password" onclick="window.openResetPassModal('${u.id}')"><svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"></path></svg></button>
-                            ${deleteBtn}
-                        </td>
-                    </tr>
-                `);
+                UI.tableUsers.insertAdjacentHTML('beforeend', `<tr><td style="font-weight: 500;">${u.email}</td><td>${roleBadge} ${permBadges}</td><td style="text-align: right;"><button class="btn-icon" title="Edit User" onclick="window.openEditUserModal('${u.id}')"><svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg></button><button class="btn-icon" title="Reset Password" onclick="window.openResetPassModal('${u.id}')"><svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"></path></svg></button>${deleteBtn}</td></tr>`);
             });
         }
 
         function formatShifts(shiftsObj) {
             if (!shiftsObj || Object.keys(shiftsObj).length === 0) return "<span style='color:var(--text-muted);'>No shifts configured</span>";
             const mapDays = {0:'Su',1:'Mo',2:'Tu',3:'We',4:'Th',5:'Fr',6:'Sa'};
-            
             const grouped = {}; 
             for (let d = 0; d < 7; d++) {
                 if (shiftsObj[d]) {
@@ -2212,14 +2003,10 @@
                     grouped[timeStr].push(d);
                 }
             }
-            
             let parts = [];
             for (const [timeStr, daysArr] of Object.entries(grouped)) {
                 const dayNames = daysArr.map(d => mapDays[d]).join(', ');
-                parts.push(`<div style="margin-bottom: 6px; display:flex; align-items:center; justify-content:space-between; gap:1rem;">
-                    <span style="color:var(--text-muted); font-size:0.8rem;">${dayNames}</span> 
-                    <span class="badge-shift">${timeStr}</span>
-                </div>`);
+                parts.push(`<div style="margin-bottom: 6px; display:flex; align-items:center; justify-content:space-between; gap:1rem;"><span style="color:var(--text-muted); font-size:0.8rem;">${dayNames}</span><span class="badge-shift">${timeStr}</span></div>`);
             }
             return parts.join('');
         }
@@ -2229,12 +2016,7 @@
             State.agents.forEach(a => {
                 if (a.shifts && Object.keys(a.shifts).length > 0) {
                     const formattedHtml = formatShifts(a.shifts);
-                    UI.tableShifts.insertAdjacentHTML('beforeend', `
-                        <tr>
-                            <td style="font-weight: 600; vertical-align: top;">${a.name}</td>
-                            <td colspan="2">${formattedHtml}</td>
-                        </tr>
-                    `);
+                    UI.tableShifts.insertAdjacentHTML('beforeend', `<tr><td style="font-weight: 600; vertical-align: top;">${a.name}</td><td colspan="2">${formattedHtml}</td></tr>`);
                 }
             });
         }
@@ -2248,9 +2030,8 @@
 
         function renderHistoryTable() {
             const results = getFilteredTickets();
-            
             UI.tableHistory.innerHTML = '';
-            UI.statFiltered.innerText = results.length;
+            if(UI.statFiltered) UI.statFiltered.innerText = results.length;
 
             if (results.length === 0) return UI.tableHistory.innerHTML = `<tr><td colspan="5" style="text-align:center; color: var(--text-muted); padding: 2rem;">No logs match criteria.</td></tr>`;
 
@@ -2260,22 +2041,9 @@
             results.slice().reverse().forEach(t => {
                 let actionHtml = '';
                 if (canManageTickets) {
-                    actionHtml = `
-                    <td class="perm-manage-tickets" style="text-align: right;">
-                        <button class="btn-icon" title="Edit Ticket" onclick="window.openEditTicketModal('${t.id}')"><svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg></button>
-                        <button class="btn-icon danger" title="Delete Ticket" onclick="window.openDeleteTicketModal('${t.id}')"><svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg></button>
-                    </td>`;
+                    actionHtml = `<td class="perm-manage-tickets" style="text-align: right;"><button class="btn-icon" title="Edit Ticket" onclick="window.openEditTicketModal('${t.id}')"><svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg></button><button class="btn-icon danger" title="Delete Ticket" onclick="window.openDeleteTicketModal('${t.id}')"><svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg></button></td>`;
                 }
-
-                UI.tableHistory.insertAdjacentHTML('beforeend', `
-                    <tr>
-                        <td style="font-weight: 600;">${t.agentName}</td>
-                        <td class="link-cell"><a href="${t.link}" target="_blank">${t.link}</a></td>
-                        <td>${t.date}</td>
-                        <td style="color: var(--text-muted);">${t.time}</td>
-                        ${actionHtml}
-                    </tr>
-                `);
+                UI.tableHistory.insertAdjacentHTML('beforeend', `<tr><td style="font-weight: 600;">${t.agentName}</td><td class="link-cell"><a href="${t.link}" target="_blank">${t.link}</a></td><td>${t.date}</td><td style="color: var(--text-muted);">${t.time}</td>${actionHtml}</tr>`);
             });
         }
 
@@ -2299,23 +2067,18 @@
             let start = new Date();
             let end = new Date();
 
-            if (selection === 'today') {
-                // Keep as today
-            } else if (selection === '7days') {
-                start.setDate(today.getDate() - 7);
-            } else if (selection === '30days') {
-                start.setDate(today.getDate() - 30);
-            } else if (selection === 'custom') {
+            if (selection === 'today') { } 
+            else if (selection === '7days') { start.setDate(today.getDate() - 7); } 
+            else if (selection === '30days') { start.setDate(today.getDate() - 30); } 
+            else if (selection === 'custom') {
                 if (UI.chartStart.value) start = new Date(UI.chartStart.value);
                 if (UI.chartEnd.value) end = new Date(UI.chartEnd.value);
             }
-
             return { start: start.toISOString().split('T')[0], end: end.toISOString().split('T')[0] };
         }
 
         function updateChart() {
             if(!loadChartInstance) return;
-            
             const range = getChartDateRange();
             const rangeCounts = {};
             
@@ -2327,7 +2090,7 @@
 
             const displayAgents = State.agents.filter(a => a.isAvailable || rangeCounts[a.name] > 0); 
             const chartWrapper = document.getElementById('chart-width-controller');
-            chartWrapper.style.minWidth = Math.max(100, displayAgents.length * 80) + 'px';
+            if(chartWrapper) chartWrapper.style.minWidth = Math.max(100, displayAgents.length * 80) + 'px';
 
             loadChartInstance.data.labels = displayAgents.map(a => a.name);
             loadChartInstance.data.datasets[0].data = displayAgents.map(a => rangeCounts[a.name] || 0);
@@ -2342,13 +2105,17 @@
 
         function switchView(clickedNav) {
             UI.navItems.forEach(n => n.classList.remove('active'));
-            clickedNav.classList.add('active');
-            UI.views.forEach(v => v.classList.remove('active'));
-            document.getElementById(clickedNav.dataset.target).classList.add('active');
-            
-            if(clickedNav.dataset.target === 'view-assign') {
-                updateChart();
+            if(typeof clickedNav === 'string') {
+                const navBtn = document.querySelector(`[data-target="${clickedNav}"]`);
+                if(navBtn) navBtn.classList.add('active');
+            } else {
+                clickedNav.classList.add('active');
             }
+            UI.views.forEach(v => v.classList.remove('active'));
+            const targetId = typeof clickedNav === 'string' ? clickedNav : clickedNav.dataset.target;
+            document.getElementById(targetId).classList.add('active');
+            
+            if(targetId === 'view-assign') updateChart();
         }
 
         function notify(message) {
@@ -2356,7 +2123,6 @@
             UI.toastBox.appendChild(t);
             setTimeout(() => { if(t.parentElement) t.remove(); }, 3000);
         }
-
     </script>
 </body>
 </html>
