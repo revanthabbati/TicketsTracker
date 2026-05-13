@@ -892,7 +892,26 @@
 
        onSnapshot(docRef, (snapshot) => {
     document.getElementById('loading-screen').classList.add('hidden');
-    const data = snapshot.exists() ? snapshot.data() : { users: [], agents: [], tickets: [], activities: [], queueIdx: 0 };
+   const data = snapshot.data();
+                
+                // DATA RECOVERY: Force create Master Admin if users array is empty
+                let dbUsers = data.users || [];
+                if (dbUsers.length === 0) {
+                    dbUsers = [{ 
+                        id: 'admin-1', 
+                        email: 'revanth.abbati@dispatchtrack.com', 
+                        password: 'Create@32', 
+                        role: 'admin',
+                        permissions: { manageAgents: true, manageShifts: true, manageTickets: true }
+                    }];
+                    State.users = dbUsers;
+                    State.commit(); // This permanently saves the admin to your v11 database
+                }
+
+                State.users = dbUsers.map(u => ({
+                    ...u,
+                    permissions: u.permissions || { manageAgents: false, manageShifts: false, manageTickets: false }
+                }));
     
     // Force Admin if missing
     let dbUsers = data.users || [];
@@ -1222,7 +1241,7 @@
         function handleLogin(e) {
             e.preventDefault();
             // Forced to lowercase to prevent case-sensitive email lockouts
-            const email = UI.loginEmail.value.trim().toLowerCase(); 
+            const email = UI.loginEmail.value.trim().toLowerCase();
             const pass = UI.loginPass.value.trim();
 
             const user = State.users.find(u => u.email.toLowerCase() === email && u.password === pass);
