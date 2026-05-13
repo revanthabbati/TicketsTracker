@@ -853,7 +853,7 @@
         const db = getFirestore(app);
         
         // Pointing directly to your original data document
-        const docRef = doc(db, "routerpro", "system_state");
+        const docRef = doc(db, "routerpro", "system_state_v10");
 
         function getFormattedTime() {
             return new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }).toLowerCase();
@@ -892,23 +892,30 @@
             document.getElementById('loading-screen').classList.add('hidden');
             const data = snapshot.exists() ? snapshot.data() : { users: [], agents: [], tickets: [], activities: [], queueIdx: 0 };
             
+            // 1. SAFEGUARD: Load all your precious data FIRST
+            State.agents = data.agents || [];
+            State.tickets = data.tickets || [];
+            State.activities = data.activities || [];
+            State.queueIdx = data.queueIdx || 0;
+            
+            // 2. NOW check for the admin user
             let dbUsers = data.users || [];
             if (dbUsers.length === 0) {
                 dbUsers = [{ 
-                    id: 'admin-1', 
-                    email: 'revanth.abbati@dispatchtrack.com', 
-                    password: 'Create@32', 
-                    role: 'admin',
+                    id: 'admin-1', email: 'revanth.abbati@dispatchtrack.com', password: 'Create@32', role: 'admin',
                     permissions: { manageAgents: true, manageShifts: true, manageTickets: true }
                 }];
                 State.users = dbUsers;
+                // Because we loaded the data first, this commit is now 100% safe
                 State.commit(); 
             } else {
-                State.users = dbUsers.map(u => ({
-                    ...u,
-                    permissions: u.permissions || { manageAgents: false, manageShifts: false, manageTickets: false }
-                }));
+                State.users = dbUsers;
             }
+            
+            // Proceed to boot if ready
+            if (!window.appBooted) { bootApp(); window.appBooted = true; }
+            else { syncUI(); }
+        });
             
             State.agents = (data.agents || []).map(a => {
                 let newShifts = a.shifts || {};
