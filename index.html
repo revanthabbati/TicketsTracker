@@ -916,7 +916,7 @@
             if (!window.appBooted) { bootApp(); window.appBooted = true; }
             else { syncUI(); }
         });
-            
+        }
             State.agents = (data.agents || []).map(a => {
                 let newShifts = a.shifts || {};
                 if (a.shift && Object.keys(newShifts).length === 0) {
