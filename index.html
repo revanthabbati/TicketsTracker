@@ -518,6 +518,11 @@
                                         <input type="text" id="input-user-pass" class="input-control" placeholder="Create a strong password" required autocomplete="off">
                                     </div>
                                     <div class="input-group">
+                                        <label>Zendesk Agent Email (Optional)</label>
+                                        <input type="email" id="input-user-zendesk" class="input-control" placeholder="agent@dispatchtrack.com" autocomplete="off">
+                                        <span class="input-hint">Zendesk actions this user takes (assign, send IR) are attributed to this email.</span>
+                                    </div>
+                                    <div class="input-group">
                                         <label>Additional Permissions (Standard Users)</label>
                                         <div class="checkbox-group">
                                             <label class="perm-check"><input type="checkbox" id="user-perm-agents"> Can Manage Agents</label>
@@ -658,6 +663,11 @@
                     </select>
                 </div>
                 <div class="input-group">
+                    <label>Zendesk Agent Email (Optional)</label>
+                    <input type="email" id="edit-user-zendesk" class="input-control" placeholder="agent@dispatchtrack.com" autocomplete="off">
+                    <span class="input-hint">Zendesk actions this user takes (assign, send IR) are attributed to this email.</span>
+                </div>
+                <div class="input-group">
                     <label>Additional Permissions</label>
                     <div class="checkbox-group">
                         <label class="perm-check"><input type="checkbox" id="edit-perm-agents"> Can Manage Agents</label>
@@ -726,7 +736,31 @@
             </div>
             <div style="display: flex; gap: 1rem; margin-top: 1.5rem;">
                 <button type="button" class="btn btn-outline" style="flex: 1;" onclick="window.closeModals()">Cancel</button>
-                <button type="button" class="btn btn-primary" style="flex: 1;" onclick="window.confirmAssignZendeskTicket()">Assign</button>
+                <button type="button" class="btn btn-primary" style="flex: 1;" onclick="window.confirmAssignZendeskTicket('assign')">Assign</button>
+                <button type="button" class="btn btn-purple" style="flex: 1;" onclick="window.confirmAssignZendeskTicket('slack')">Sync & Slack</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="modal-send-ir" class="modal-overlay">
+        <div class="modal-content wide">
+            <h2 style="font-size: 1.4rem; font-weight: 700; margin-bottom: 0.5rem;">Send Initial Response</h2>
+            <p style="color: var(--text-muted); margin-bottom: 1.5rem; font-size: 0.9rem;" id="send-ir-subject"></p>
+            <input type="hidden" id="send-ir-id">
+            <div class="input-group">
+                <label>Assign To Agent</label>
+                <select id="send-ir-agent" class="input-control" required></select>
+                <span class="input-hint">Only agents with a Zendesk Agent Email set (Manage Agents) are shown. Drafting starts once you pick one.</span>
+            </div>
+            <div class="input-group">
+                <label>Draft Response <span id="send-ir-status" style="text-transform: none; font-weight: 500; color: var(--text-muted);"></span></label>
+                <textarea id="send-ir-draft" class="input-control" rows="8" placeholder="Select an agent above to generate a draft..."></textarea>
+                <span class="input-hint">This is exactly what will be posted as a public reply to the customer &mdash; edit it before sending.</span>
+            </div>
+            <div style="display: flex; gap: 1rem; margin-top: 1rem;">
+                <button type="button" class="btn btn-outline" style="flex: 1;" onclick="window.closeModals()">Cancel</button>
+                <button type="button" class="btn btn-outline" id="btn-regenerate-ir" style="flex: 1;" onclick="window.regenerateIrDraft()">Regenerate</button>
+                <button type="button" class="btn btn-primary" style="flex: 1;" onclick="window.confirmSendIr()">Send</button>
             </div>
         </div>
     </div>
@@ -947,6 +981,7 @@
             formUser: document.getElementById('form-user'),
             inputUserEmail: document.getElementById('input-user-email'),
             inputUserPass: document.getElementById('input-user-pass'),
+            inputUserZendesk: document.getElementById('input-user-zendesk'),
             inputPermAgents: document.getElementById('user-perm-agents'),
             inputPermShifts: document.getElementById('user-perm-shifts'),
             inputPermTickets: document.getElementById('user-perm-tickets'),
@@ -986,6 +1021,7 @@
             editUserId: document.getElementById('edit-user-id'),
             editUserEmail: document.getElementById('edit-user-email'),
             editUserRole: document.getElementById('edit-user-role'),
+            editUserZendesk: document.getElementById('edit-user-zendesk'),
             editPermAgents: document.getElementById('edit-perm-agents'),
             editPermShifts: document.getElementById('edit-perm-shifts'),
             editPermTickets: document.getElementById('edit-perm-tickets'),
@@ -1007,6 +1043,13 @@
             assignZendeskSubject: document.getElementById('assign-zendesk-subject'),
             assignZendeskId: document.getElementById('assign-zendesk-id'),
             assignZendeskAgentSelect: document.getElementById('assign-zendesk-agent'),
+
+            modalSendIr: document.getElementById('modal-send-ir'),
+            sendIrSubject: document.getElementById('send-ir-subject'),
+            sendIrId: document.getElementById('send-ir-id'),
+            sendIrAgentSelect: document.getElementById('send-ir-agent'),
+            sendIrDraft: document.getElementById('send-ir-draft'),
+            sendIrStatus: document.getElementById('send-ir-status'),
         };
 
         const barLabelsPlugin = {
@@ -1244,6 +1287,7 @@
             UI.modalDeleteTicket.classList.remove('active');
             UI.modalTicketSummary.classList.remove('active');
             UI.modalAssignZendesk.classList.remove('active');
+            UI.modalSendIr.classList.remove('active');
         };
 
         /* Ticket Modals */
@@ -1377,6 +1421,7 @@
                 UI.editUserId.value = user.id;
                 UI.editUserEmail.value = user.email;
                 UI.editUserRole.value = user.role;
+                UI.editUserZendesk.value = user.zendeskAgentEmail || '';
                 UI.editPermAgents.checked = user.permissions?.manageAgents || false;
                 UI.editPermShifts.checked = user.permissions?.manageShifts || false;
                 UI.editPermTickets.checked = user.permissions?.manageTickets || false;
@@ -1410,6 +1455,7 @@
             if (user) {
                 user.email = UI.editUserEmail.value.trim();
                 user.role = UI.editUserRole.value;
+                user.zendeskAgentEmail = UI.editUserZendesk.value.trim();
                 user.permissions = {
                     manageAgents: UI.editPermAgents.checked,
                     manageShifts: UI.editPermShifts.checked,
@@ -1647,17 +1693,19 @@
             e.preventDefault();
             const email = UI.inputUserEmail.value.trim();
             const pass = UI.inputUserPass.value.trim();
-            
+            const zendeskAgentEmail = UI.inputUserZendesk.value.trim();
+
             if (State.users.some(u => u.email === email)) {
                 notify("A user with this email already exists.");
                 return;
             }
 
-            State.users.push({ 
-                id: crypto.randomUUID(), 
-                email: email, 
-                password: pass, 
+            State.users.push({
+                id: crypto.randomUUID(),
+                email: email,
+                password: pass,
                 role: 'user',
+                zendeskAgentEmail: zendeskAgentEmail,
                 permissions: {
                     manageAgents: UI.inputPermAgents.checked,
                     manageShifts: UI.inputPermShifts.checked,
@@ -1667,6 +1715,7 @@
             State.commit();
             UI.inputUserEmail.value = '';
             UI.inputUserPass.value = '';
+            UI.inputUserZendesk.value = '';
             UI.inputPermAgents.checked = false;
             UI.inputPermShifts.checked = false;
             UI.inputPermTickets.checked = false;
@@ -2299,9 +2348,16 @@
             }[ch]));
         }
 
-        async function zendeskFetch(targetUrl, options = {}) {
+        function resolveZendeskActingEmail() {
+            const cu = State.currentUser;
+            if (cu && cu.zendeskAgentEmail && cu.zendeskAgentEmail.trim()) return cu.zendeskAgentEmail.trim();
+            return (State.settings.zendesk && State.settings.zendesk.email) || '';
+        }
+
+        async function zendeskFetch(targetUrl, options = {}, actingEmail = null) {
             const zd = State.settings.zendesk;
-            const authValue = btoa(`${zd.email}/token:${zd.apiToken}`);
+            const email = actingEmail || zd.email;
+            const authValue = btoa(`${email}/token:${zd.apiToken}`);
             const proxyUrl = zd.proxyUrl.replace(/\/+$/, '');
             const headers = Object.assign({ Authorization: `Basic ${authValue}` }, options.headers || {});
             return fetch(`${proxyUrl}?target=${encodeURIComponent(targetUrl)}`, { ...options, headers });
@@ -2354,10 +2410,17 @@
                 const createdDisplay = formatZendeskTimestamp(t.created_at);
 
                 UI.tableZendeskQueue.insertAdjacentHTML('beforeend', `
-                    <tr>
+                    <tr id="zendesk-row-${t.id}">
                         <td class="ticket-subject-cell">
-                            <span class="subj">#${t.id} &mdash; ${escapeHtml(t.subject || '(no subject)')}</span>
-                            <span class="req">${escapeHtml(requesterName)}</span>
+                            <div style="display:flex; align-items:flex-start; gap:0.4rem;">
+                                <button class="btn-icon" title="View customer message" onclick="window.toggleZendeskMessage(${t.id})">
+                                    <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                                </button>
+                                <div>
+                                    <span class="subj">#${t.id} &mdash; ${escapeHtml(t.subject || '(no subject)')}</span>
+                                    <span class="req">${escapeHtml(requesterName)}</span>
+                                </div>
+                            </div>
                         </td>
                         <td><span class="priority-badge priority-${escapeHtml(priority)}">${escapeHtml(priority)}</span></td>
                         <td style="color: var(--text-muted);">${createdDisplay}</td>
@@ -2366,12 +2429,28 @@
                             <div class="zendesk-row-actions">
                                 <button class="btn btn-outline" style="padding: 0.4rem 0.9rem; font-size: 0.8rem;" onclick="window.openTicketSummaryModal(${t.id})">Summarize</button>
                                 <button class="btn btn-primary" style="padding: 0.4rem 0.9rem; font-size: 0.8rem;" onclick="window.openAssignZendeskModal(${t.id})">Assign</button>
+                                <button class="btn btn-purple" style="padding: 0.4rem 0.9rem; font-size: 0.8rem;" onclick="window.openSendIrModal(${t.id})">Send IR</button>
                             </div>
                         </td>
                     </tr>
                 `);
             });
         }
+
+        window.toggleZendeskMessage = function(ticketId) {
+            const existing = document.getElementById(`zendesk-detail-${ticketId}`);
+            if (existing) { existing.remove(); return; }
+
+            const row = document.getElementById(`zendesk-row-${ticketId}`);
+            const ticket = zendeskQueueCache.find(t => t.id === ticketId);
+            if (!row || !ticket) return;
+
+            row.insertAdjacentHTML('afterend', `
+                <tr id="zendesk-detail-${ticketId}">
+                    <td colspan="5"><div class="summary-box">${escapeHtml(ticket.description || '(no message content)')}</div></td>
+                </tr>
+            `);
+        };
 
         function formatZendeskTimestamp(isoString) {
             if (!isoString) return '';
@@ -2460,7 +2539,7 @@
             UI.modalAssignZendesk.classList.add('active');
         };
 
-        window.confirmAssignZendeskTicket = async function() {
+        window.confirmAssignZendeskTicket = async function(action) {
             const ticketId = Number(UI.assignZendeskId.value);
             const agentId = UI.assignZendeskAgentSelect.value;
             const ticket = zendeskQueueCache.find(t => t.id === ticketId);
@@ -2477,7 +2556,7 @@
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ ticket: { assignee_email: agent.zendeskEmail } })
-                });
+                }, resolveZendeskActingEmail());
                 if (!res.ok) throw new Error(`Zendesk returned ${res.status}`);
 
                 State.tickets.push({
@@ -2499,10 +2578,136 @@
                 renderZendeskQueueTable();
 
                 window.closeModals();
-                notify(`Assigned Zendesk ticket #${ticket.id} to ${agent.name}`);
+                if (!handleSlackRedirect(action, agent)) {
+                    notify(`Assigned Zendesk ticket #${ticket.id} to ${agent.name}`);
+                }
             } catch (err) {
                 console.error(err);
                 notify("Failed to assign in Zendesk — check the console.");
+            }
+        };
+
+        window.openSendIrModal = function(ticketId) {
+            const ticket = zendeskQueueCache.find(t => t.id === ticketId);
+            if (!ticket) return;
+
+            UI.sendIrId.value = ticket.id;
+            UI.sendIrSubject.innerText = `#${ticket.id} — ${ticket.subject || '(no subject)'}`;
+            UI.sendIrDraft.value = '';
+            UI.sendIrStatus.innerText = '';
+
+            const eligibleAgents = State.agents.filter(a => a.zendeskEmail && a.zendeskEmail.trim() !== '');
+            UI.sendIrAgentSelect.innerHTML = '';
+            if (eligibleAgents.length === 0) {
+                UI.sendIrAgentSelect.innerHTML = '<option value="">-- No agents have a Zendesk email set --</option>';
+            } else {
+                UI.sendIrAgentSelect.insertAdjacentHTML('beforeend', '<option value="">-- Select an agent --</option>');
+                eligibleAgents.forEach(a => {
+                    UI.sendIrAgentSelect.insertAdjacentHTML('beforeend', `<option value="${a.id}">${escapeHtml(a.name)} (${escapeHtml(a.role)})</option>`);
+                });
+            }
+            UI.sendIrAgentSelect.onchange = generateIrDraft;
+
+            UI.modalSendIr.classList.add('active');
+        };
+
+        async function generateIrDraft() {
+            const agentId = UI.sendIrAgentSelect.value;
+            const ticketId = Number(UI.sendIrId.value);
+            const ticket = zendeskQueueCache.find(t => t.id === ticketId);
+            const agent = State.agents.find(a => a.id === agentId);
+
+            if (!agent || !ticket) {
+                UI.sendIrDraft.value = '';
+                return;
+            }
+
+            const ai = State.settings.ai;
+            if (!ai || !ai.apiKey) {
+                UI.sendIrStatus.innerText = '(no AI key configured — write manually)';
+                return;
+            }
+
+            const requesterName = zendeskRequesterMap[ticket.requester_id] || 'there';
+            const template = (State.settings.irTemplate || '').trim();
+
+            UI.sendIrStatus.innerText = 'Drafting…';
+            UI.sendIrDraft.value = '';
+
+            try {
+                const model = ai.model || 'gemini-2.0-flash';
+                const prompt = `Write an initial support response reply to a customer.${template ? `\n\nUse this template as a style and structure guide (write natural text, do not include literal placeholder syntax in the output):\n---\n${template}\n---` : ''}\n\nAgent name: ${agent.name}\nCustomer name: ${requesterName}\nTicket subject: ${ticket.subject || ''}\nCustomer's message: ${ticket.description || '(no description)'}\n\nWrite only the reply text, ready to send as-is, addressed to ${requesterName}, acknowledging their issue. Keep it warm, professional, and concise. Do not include a subject line.`;
+                const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${ai.apiKey}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+                });
+                if (!res.ok) throw new Error(`Gemini returned ${res.status}`);
+                const data = await res.json();
+                const text = data.candidates && data.candidates[0] && data.candidates[0].content
+                    && data.candidates[0].content.parts && data.candidates[0].content.parts[0]
+                    && data.candidates[0].content.parts[0].text;
+                UI.sendIrDraft.value = (text || '').trim();
+                UI.sendIrStatus.innerText = '';
+            } catch (err) {
+                console.error(err);
+                UI.sendIrStatus.innerText = '(draft failed — write manually)';
+            }
+        }
+
+        window.regenerateIrDraft = function() {
+            if (!UI.sendIrAgentSelect.value) return notify("Select an agent first.");
+            generateIrDraft();
+        };
+
+        window.confirmSendIr = async function() {
+            const ticketId = Number(UI.sendIrId.value);
+            const agentId = UI.sendIrAgentSelect.value;
+            const ticket = zendeskQueueCache.find(t => t.id === ticketId);
+            const agent = State.agents.find(a => a.id === agentId);
+            const replyText = UI.sendIrDraft.value.trim();
+
+            if (!ticket || !agent || !agent.zendeskEmail) {
+                return notify("Select an agent with a Zendesk email set.");
+            }
+            if (!replyText) {
+                return notify("Write or generate a response before sending.");
+            }
+
+            try {
+                const zd = State.settings.zendesk;
+                const target = `https://${zd.subdomain}.zendesk.com/api/v2/tickets/${ticket.id}.json`;
+                const res = await zendeskFetch(target, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ticket: { assignee_email: agent.zendeskEmail, comment: { body: replyText, public: true } } })
+                }, resolveZendeskActingEmail());
+                if (!res.ok) throw new Error(`Zendesk returned ${res.status}`);
+
+                State.tickets.push({
+                    id: crypto.randomUUID(),
+                    agentId: agent.id,
+                    agentName: agent.name,
+                    link: `https://${zd.subdomain}.zendesk.com/agent/tickets/${ticket.id}`,
+                    date: new Date().toISOString().split('T')[0],
+                    time: getFormattedTime(),
+                    zendeskId: ticket.id,
+                    source: 'zendesk',
+                    irSent: true
+                });
+                agent.total++;
+                logActivity(agent.name, `sent an initial response on Zendesk ticket #${ticket.id}`);
+                State.commit();
+                syncUI();
+
+                zendeskQueueCache = zendeskQueueCache.filter(t => t.id !== ticket.id);
+                renderZendeskQueueTable();
+
+                window.closeModals();
+                notify(`Initial response sent and ticket #${ticket.id} assigned to ${agent.name}`);
+            } catch (err) {
+                console.error(err);
+                notify("Failed to send the initial response — check the console.");
             }
         };
 

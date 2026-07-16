@@ -100,6 +100,24 @@
                 </form>
             </div>
         </div>
+
+        <div class="section-divider">Initial Response</div>
+
+        <div class="panel">
+            <div class="panel-header">
+                <h2>Initial Response Template</h2>
+            </div>
+            <div class="panel-body">
+                <form id="form-ir-template">
+                    <div class="input-group">
+                        <label>Template</label>
+                        <textarea id="ir-template-text" class="input-control" rows="8" placeholder="Hi {{customer_name}}, thanks for reaching out..."></textarea>
+                        <span class="input-hint">Used as a style/structure guide when the Zendesk Queue's "Send IR" drafts a reply with AI. Free-form text &mdash; placeholders like customer/agent name are just a hint for the AI, not literal substitution.</span>
+                    </div>
+                    <button type="submit" class="btn btn-primary" style="width: 100%;">Save Template</button>
+                </form>
+            </div>
+        </div>
     </div>
 
     <div id="toast-container"></div>
@@ -195,6 +213,8 @@
             const zdProxy = document.getElementById('zd-proxy');
             const aiKey = document.getElementById('ai-key');
             const aiModel = document.getElementById('ai-model');
+            const formIrTemplate = document.getElementById('form-ir-template');
+            const irTemplateText = document.getElementById('ir-template-text');
 
             onSnapshot(docRef, (snapshot) => {
                 const data = snapshot.exists() ? snapshot.data() : {};
@@ -208,6 +228,7 @@
                 if (document.activeElement !== zdProxy) zdProxy.value = zd.proxyUrl || '';
                 if (document.activeElement !== aiKey) aiKey.value = ai.apiKey || '';
                 if (document.activeElement !== aiModel) aiModel.value = ai.model || 'gemini-2.0-flash';
+                if (document.activeElement !== irTemplateText) irTemplateText.value = settings.irTemplate || '';
             });
 
             formZendesk.addEventListener('submit', async (e) => {
@@ -231,6 +252,12 @@
                 };
                 await saveSettingsField('ai', value);
                 notify('AI settings saved.');
+            });
+
+            formIrTemplate.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                await saveSettingsField('irTemplate', irTemplateText.value.trim());
+                notify('Initial Response template saved.');
             });
 
             document.getElementById('btn-test-zendesk').addEventListener('click', testZendeskConnection);
