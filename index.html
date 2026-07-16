@@ -484,11 +484,12 @@
                                         <th>Ticket</th>
                                         <th>Priority</th>
                                         <th>Created</th>
+                                        <th>Open For</th>
                                         <th style="text-align: right;">Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody id="table-zendesk-queue">
-                                    <tr><td colspan="4" style="text-align:center; color: var(--text-muted); padding: 2rem;">Configure Zendesk in <a href="admin.html">admin.html</a>, then click Refresh.</td></tr>
+                                    <tr><td colspan="5" style="text-align:center; color: var(--text-muted); padding: 2rem;">Configure Zendesk in <a href="admin.html">admin.html</a>, then click Refresh.</td></tr>
                                 </tbody>
                             </table>
                         </div>
@@ -2309,13 +2310,13 @@
         async function fetchUnassignedZendeskTickets() {
             const zd = State.settings.zendesk;
             if (!zd || !zd.subdomain || !zd.email || !zd.apiToken || !zd.proxyUrl) {
-                UI.tableZendeskQueue.innerHTML = `<tr><td colspan="4" style="text-align:center; color: var(--text-muted); padding: 2rem;">Configure Zendesk in <a href="admin.html">admin.html</a>, then click Refresh.</td></tr>`;
+                UI.tableZendeskQueue.innerHTML = `<tr><td colspan="5" style="text-align:center; color: var(--text-muted); padding: 2rem;">Configure Zendesk in <a href="admin.html">admin.html</a>, then click Refresh.</td></tr>`;
                 UI.statZendeskUnassigned.innerText = '0';
                 return;
             }
 
             UI.zendeskQueueStatus.innerText = 'Loading…';
-            UI.tableZendeskQueue.innerHTML = `<tr><td colspan="4" style="text-align:center; color: var(--text-muted); padding: 2rem;">Loading tickets from Zendesk…</td></tr>`;
+            UI.tableZendeskQueue.innerHTML = `<tr><td colspan="5" style="text-align:center; color: var(--text-muted); padding: 2rem;">Loading tickets from Zendesk…</td></tr>`;
 
             try {
                 const query = 'type:ticket status<solved assignee:none';
@@ -2333,7 +2334,7 @@
             } catch (err) {
                 console.error(err);
                 UI.zendeskQueueStatus.innerText = '';
-                UI.tableZendeskQueue.innerHTML = `<tr><td colspan="4" style="text-align:center; color: #f43f5e; padding: 2rem;">Couldn't load tickets. Check Zendesk settings in admin.html and the console.</td></tr>`;
+                UI.tableZendeskQueue.innerHTML = `<tr><td colspan="5" style="text-align:center; color: #f43f5e; padding: 2rem;">Couldn't load tickets. Check Zendesk settings in admin.html and the console.</td></tr>`;
                 notify("Failed to load Zendesk tickets.");
             }
         }
@@ -2343,14 +2344,14 @@
             UI.tableZendeskQueue.innerHTML = '';
 
             if (zendeskQueueCache.length === 0) {
-                UI.tableZendeskQueue.innerHTML = `<tr><td colspan="4" style="text-align:center; color: var(--text-muted); padding: 2rem;">No unassigned tickets right now.</td></tr>`;
+                UI.tableZendeskQueue.innerHTML = `<tr><td colspan="5" style="text-align:center; color: var(--text-muted); padding: 2rem;">No unassigned tickets right now.</td></tr>`;
                 return;
             }
 
             zendeskQueueCache.forEach(t => {
                 const requesterName = zendeskRequesterMap[t.requester_id] || `Requester #${t.requester_id}`;
                 const priority = t.priority || 'normal';
-                const created = t.created_at ? t.created_at.split('T')[0] : '';
+                const createdDisplay = formatZendeskTimestamp(t.created_at);
 
                 UI.tableZendeskQueue.insertAdjacentHTML('beforeend', `
                     <tr>
@@ -2359,7 +2360,8 @@
                             <span class="req">${escapeHtml(requesterName)}</span>
                         </td>
                         <td><span class="priority-badge priority-${escapeHtml(priority)}">${escapeHtml(priority)}</span></td>
-                        <td style="color: var(--text-muted);">${created}</td>
+                        <td style="color: var(--text-muted);">${createdDisplay}</td>
+                        <td><span class="badge-shift zendesk-age" data-created="${escapeHtml(t.created_at || '')}">${escapeHtml(formatZendeskAge(t.created_at))}</span></td>
                         <td style="text-align: right;">
                             <div class="zendesk-row-actions">
                                 <button class="btn btn-outline" style="padding: 0.4rem 0.9rem; font-size: 0.8rem;" onclick="window.openTicketSummaryModal(${t.id})">Summarize</button>
@@ -2370,6 +2372,39 @@
                 `);
             });
         }
+
+        function formatZendeskTimestamp(isoString) {
+            if (!isoString) return '';
+            const d = new Date(isoString);
+            if (isNaN(d.getTime())) return '';
+            return d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true });
+        }
+
+        function formatZendeskAge(isoString) {
+            if (!isoString) return '';
+            const created = new Date(isoString).getTime();
+            if (isNaN(created)) return '';
+            const diffMs = Math.max(0, Date.now() - created);
+            const diffMins = Math.floor(diffMs / 60000);
+
+            if (diffMins < 1) return 'just now';
+            if (diffMins < 60) return `${diffMins}m`;
+
+            const diffHours = Math.floor(diffMins / 60);
+            const remMins = diffMins % 60;
+            if (diffHours < 24) return `${diffHours}h ${remMins}m`;
+
+            const diffDays = Math.floor(diffHours / 24);
+            const remHours = diffHours % 24;
+            return `${diffDays}d ${remHours}h`;
+        }
+
+        function tickZendeskQueueAges() {
+            document.querySelectorAll('.zendesk-age').forEach(el => {
+                el.textContent = formatZendeskAge(el.dataset.created);
+            });
+        }
+        setInterval(tickZendeskQueueAges, 30000);
 
         window.openTicketSummaryModal = async function(ticketId) {
             const ticket = zendeskQueueCache.find(t => t.id === ticketId);
