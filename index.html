@@ -459,20 +459,31 @@
                     <div class="view-header-flex" style="margin-bottom: 1.5rem;">
                         <div class="page-title">
                             <h1>Zendesk Queue</h1>
-                            <p>Unassigned Zendesk tickets &mdash; summarize and assign without leaving the tracker.</p>
+                            <p>Unassigned and suspended Zendesk tickets &mdash; summarize, assign, and reply without leaving the tracker.</p>
                         </div>
                         <div class="stat-cards">
                             <div class="stat-card blue" style="min-width:auto;">
                                 <span class="stat-label">Unassigned Tickets</span>
                                 <span class="stat-value" id="stat-zendesk-unassigned">0</span>
                             </div>
+                            <div class="stat-card pink" style="min-width:auto;">
+                                <span class="stat-label">Suspended Tickets</span>
+                                <span class="stat-value" id="stat-zendesk-suspended">0</span>
+                            </div>
                         </div>
                     </div>
 
-                    <div class="panel">
+                    <div style="display: flex; gap: 0.5rem; margin-bottom: 1rem;">
+                        <button type="button" class="btn btn-primary" id="tab-zendesk-unassigned" style="padding: 0.6rem 1.25rem;" onclick="window.switchZendeskTab('unassigned')">Unassigned</button>
+                        <button type="button" class="btn btn-outline" id="tab-zendesk-suspended" style="padding: 0.6rem 1.25rem;" onclick="window.switchZendeskTab('suspended')">Suspended</button>
+                    </div>
+
+                    <div id="zendesk-unassigned-panel" class="panel">
                         <div class="panel-header">
                             <h2>Unassigned Tickets</h2>
-                            <div style="display: flex; gap: 0.75rem; align-items: center;">
+                            <div style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
+                                <span id="zendesk-selected-count" style="font-size: 0.8rem; color: var(--text-muted);"></span>
+                                <button class="btn btn-purple" id="btn-bulk-send-ir" style="padding: 0.4rem 1rem; font-size: 0.8rem;" disabled>Send IR to Selected</button>
                                 <span id="zendesk-queue-status" style="font-size: 0.8rem; color: var(--text-muted);"></span>
                                 <button class="btn btn-outline" id="btn-refresh-zendesk" style="padding: 0.4rem 1rem; font-size: 0.8rem;">Refresh</button>
                             </div>
@@ -481,6 +492,7 @@
                             <table>
                                 <thead>
                                     <tr>
+                                        <th style="width: 2.5rem;"><input type="checkbox" id="zendesk-select-all"></th>
                                         <th>Ticket</th>
                                         <th>Priority</th>
                                         <th>Created</th>
@@ -489,6 +501,32 @@
                                     </tr>
                                 </thead>
                                 <tbody id="table-zendesk-queue">
+                                    <tr><td colspan="6" style="text-align:center; color: var(--text-muted); padding: 2rem;">Configure Zendesk in <a href="admin.html">admin.html</a>, then click Refresh.</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div id="zendesk-suspended-panel" class="panel hidden">
+                        <div class="panel-header">
+                            <h2>Suspended Tickets</h2>
+                            <div style="display: flex; gap: 0.75rem; align-items: center;">
+                                <span id="zendesk-suspended-status" style="font-size: 0.8rem; color: var(--text-muted);"></span>
+                                <button class="btn btn-outline" id="btn-refresh-suspended" style="padding: 0.4rem 1rem; font-size: 0.8rem;">Refresh</button>
+                            </div>
+                        </div>
+                        <div style="max-height: 600px; overflow-y: auto;">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Ticket</th>
+                                        <th>Cause</th>
+                                        <th>Created</th>
+                                        <th>Open For</th>
+                                        <th style="text-align: right;">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="table-zendesk-suspended">
                                     <tr><td colspan="5" style="text-align:center; color: var(--text-muted); padding: 2rem;">Configure Zendesk in <a href="admin.html">admin.html</a>, then click Refresh.</td></tr>
                                 </tbody>
                             </table>
@@ -765,6 +803,22 @@
         </div>
     </div>
 
+    <div id="modal-bulk-send-ir" class="modal-overlay">
+        <div class="modal-content wide">
+            <h2 style="font-size: 1.4rem; font-weight: 700; margin-bottom: 0.5rem;">Send Initial Response to Selected</h2>
+            <p style="color: var(--text-muted); margin-bottom: 1.5rem; font-size: 0.9rem;" id="bulk-ir-subject"></p>
+            <div class="input-group">
+                <label>Message (sent as-is to every selected ticket)</label>
+                <textarea id="bulk-ir-draft" class="input-control" rows="8" placeholder="Your Initial Response template..."></textarea>
+                <span class="input-hint">Starts from your saved Initial Response template (admin.html) &mdash; edit before sending. These tickets remain unassigned.</span>
+            </div>
+            <div style="display: flex; gap: 1rem; margin-top: 1rem;">
+                <button type="button" class="btn btn-outline" style="flex: 1;" onclick="window.closeModals()">Cancel</button>
+                <button type="button" class="btn btn-primary" style="flex: 1;" onclick="window.confirmBulkSendIr()">Send to Selected</button>
+            </div>
+        </div>
+    </div>
+
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
         import { getFirestore, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
@@ -847,7 +901,18 @@
                     ...u,
                     permissions: u.permissions || { manageAgents: false, manageShifts: false, manageTickets: false }
                 }));
-                
+
+                // Keep the logged-in session's currentUser in sync with the live users list --
+                // otherwise edits to your own account (zendeskAgentEmail, permissions, role)
+                // silently don't take effect until you log out and back in.
+                if (State.currentUser) {
+                    const freshSelf = State.users.find(u => u.id === State.currentUser.id);
+                    if (freshSelf) {
+                        State.currentUser = freshSelf;
+                        localStorage.setItem('ent_v14_currUser', JSON.stringify(State.currentUser));
+                    }
+                }
+
                 State.agents = (data.agents || []).map(a => {
                     let newShifts = a.shifts || {};
                     if (a.shift && Object.keys(newShifts).length === 0) {
@@ -895,6 +960,8 @@
         let loadChartInstance = null;
         let zendeskQueueCache = [];
         let zendeskRequesterMap = {};
+        let zendeskSuspendedCache = [];
+        let zendeskSelectedIds = new Set();
 
         /** --- DOM BINDINGS --- **/
         const UI = {
@@ -989,9 +1056,20 @@
 
             // Zendesk Queue
             statZendeskUnassigned: document.getElementById('stat-zendesk-unassigned'),
+            statZendeskSuspended: document.getElementById('stat-zendesk-suspended'),
+            tabZendeskUnassigned: document.getElementById('tab-zendesk-unassigned'),
+            tabZendeskSuspended: document.getElementById('tab-zendesk-suspended'),
+            panelZendeskUnassigned: document.getElementById('zendesk-unassigned-panel'),
+            panelZendeskSuspended: document.getElementById('zendesk-suspended-panel'),
             tableZendeskQueue: document.getElementById('table-zendesk-queue'),
+            tableZendeskSuspended: document.getElementById('table-zendesk-suspended'),
             zendeskQueueStatus: document.getElementById('zendesk-queue-status'),
+            zendeskSuspendedStatus: document.getElementById('zendesk-suspended-status'),
             btnRefreshZendesk: document.getElementById('btn-refresh-zendesk'),
+            btnRefreshSuspended: document.getElementById('btn-refresh-suspended'),
+            zendeskSelectAll: document.getElementById('zendesk-select-all'),
+            zendeskSelectedCount: document.getElementById('zendesk-selected-count'),
+            btnBulkSendIr: document.getElementById('btn-bulk-send-ir'),
 
             // Modals
             modalEditTicket: document.getElementById('modal-edit-ticket'),
@@ -1050,6 +1128,10 @@
             sendIrAgentSelect: document.getElementById('send-ir-agent'),
             sendIrDraft: document.getElementById('send-ir-draft'),
             sendIrStatus: document.getElementById('send-ir-status'),
+
+            modalBulkSendIr: document.getElementById('modal-bulk-send-ir'),
+            bulkIrSubject: document.getElementById('bulk-ir-subject'),
+            bulkIrDraft: document.getElementById('bulk-ir-draft'),
         };
 
         const barLabelsPlugin = {
@@ -1195,7 +1277,28 @@
             UI.formShift.addEventListener('submit', processSaveShift);
 
             UI.btnRefreshZendesk.addEventListener('click', fetchUnassignedZendeskTickets);
-            
+            UI.btnRefreshSuspended.addEventListener('click', fetchSuspendedZendeskTickets);
+            UI.btnBulkSendIr.addEventListener('click', window.openBulkSendIrModal);
+
+            UI.zendeskSelectAll.addEventListener('change', () => {
+                if (UI.zendeskSelectAll.checked) {
+                    zendeskQueueCache.forEach(t => zendeskSelectedIds.add(t.id));
+                } else {
+                    zendeskSelectedIds.clear();
+                }
+                renderZendeskQueueTable();
+                updateBulkSendIrToolbar();
+            });
+
+            UI.tableZendeskQueue.addEventListener('change', (e) => {
+                if (e.target.classList.contains('zendesk-select-checkbox')) {
+                    const id = Number(e.target.dataset.id);
+                    if (e.target.checked) zendeskSelectedIds.add(id); else zendeskSelectedIds.delete(id);
+                    UI.zendeskSelectAll.checked = zendeskQueueCache.length > 0 && zendeskQueueCache.every(t => zendeskSelectedIds.has(t.id));
+                    updateBulkSendIrToolbar();
+                }
+            });
+
             document.querySelectorAll('.day-toggle').forEach(toggle => {
                 toggle.addEventListener('change', (e) => {
                     const day = e.target.dataset.day;
@@ -1288,6 +1391,7 @@
             UI.modalTicketSummary.classList.remove('active');
             UI.modalAssignZendesk.classList.remove('active');
             UI.modalSendIr.classList.remove('active');
+            UI.modalBulkSendIr.classList.remove('active');
         };
 
         /* Ticket Modals */
@@ -2364,34 +2468,55 @@
         }
 
         async function fetchUnassignedZendeskTickets() {
+            zendeskSelectedIds.clear();
+            UI.zendeskSelectAll.checked = false;
+            updateBulkSendIrToolbar();
+
             const zd = State.settings.zendesk;
             if (!zd || !zd.subdomain || !zd.email || !zd.apiToken || !zd.proxyUrl) {
-                UI.tableZendeskQueue.innerHTML = `<tr><td colspan="5" style="text-align:center; color: var(--text-muted); padding: 2rem;">Configure Zendesk in <a href="admin.html">admin.html</a>, then click Refresh.</td></tr>`;
+                UI.tableZendeskQueue.innerHTML = `<tr><td colspan="6" style="text-align:center; color: var(--text-muted); padding: 2rem;">Configure Zendesk in <a href="admin.html">admin.html</a>, then click Refresh.</td></tr>`;
                 UI.statZendeskUnassigned.innerText = '0';
                 return;
             }
 
             UI.zendeskQueueStatus.innerText = 'Loading…';
-            UI.tableZendeskQueue.innerHTML = `<tr><td colspan="5" style="text-align:center; color: var(--text-muted); padding: 2rem;">Loading tickets from Zendesk…</td></tr>`;
+            UI.tableZendeskQueue.innerHTML = `<tr><td colspan="6" style="text-align:center; color: var(--text-muted); padding: 2rem;">Loading tickets from Zendesk…</td></tr>`;
 
             try {
                 const query = 'type:ticket status<solved assignee:none';
-                const target = `https://${zd.subdomain}.zendesk.com/api/v2/search.json?query=${encodeURIComponent(query)}&sort_by=created_at&sort_order=asc&include=users`;
+                const target = `https://${zd.subdomain}.zendesk.com/api/v2/search.json?query=${encodeURIComponent(query)}&sort_by=created_at&sort_order=asc`;
                 const res = await zendeskFetch(target, { method: 'GET' });
                 if (!res.ok) throw new Error(`Zendesk returned ${res.status}`);
                 const data = await res.json();
 
-                zendeskRequesterMap = {};
-                (data.users || []).forEach(u => { zendeskRequesterMap[u.id] = u.name; });
-
                 zendeskQueueCache = data.results || [];
+                await loadZendeskRequesterNames(zendeskQueueCache);
                 renderZendeskQueueTable();
                 UI.zendeskQueueStatus.innerText = `Updated ${getFormattedTime()}`;
             } catch (err) {
                 console.error(err);
                 UI.zendeskQueueStatus.innerText = '';
-                UI.tableZendeskQueue.innerHTML = `<tr><td colspan="5" style="text-align:center; color: #f43f5e; padding: 2rem;">Couldn't load tickets. Check Zendesk settings in admin.html and the console.</td></tr>`;
+                UI.tableZendeskQueue.innerHTML = `<tr><td colspan="6" style="text-align:center; color: #f43f5e; padding: 2rem;">Couldn't load tickets. Check Zendesk settings in admin.html and the console.</td></tr>`;
                 notify("Failed to load Zendesk tickets.");
+            }
+        }
+
+        // Zendesk's /search.json silently ignores `include=users`, so requester names
+        // have to be resolved with a real batch lookup instead of a sideload.
+        async function loadZendeskRequesterNames(tickets) {
+            const zd = State.settings.zendesk;
+            const ids = [...new Set((tickets || []).map(t => t.requester_id).filter(Boolean))]
+                .filter(id => !(id in zendeskRequesterMap));
+            if (ids.length === 0) return;
+
+            try {
+                const target = `https://${zd.subdomain}.zendesk.com/api/v2/users/show_many.json?ids=${ids.join(',')}`;
+                const res = await zendeskFetch(target, { method: 'GET' });
+                if (!res.ok) throw new Error(`Zendesk returned ${res.status}`);
+                const data = await res.json();
+                (data.users || []).forEach(u => { zendeskRequesterMap[u.id] = u.name; });
+            } catch (err) {
+                console.error(err);
             }
         }
 
@@ -2400,7 +2525,7 @@
             UI.tableZendeskQueue.innerHTML = '';
 
             if (zendeskQueueCache.length === 0) {
-                UI.tableZendeskQueue.innerHTML = `<tr><td colspan="5" style="text-align:center; color: var(--text-muted); padding: 2rem;">No unassigned tickets right now.</td></tr>`;
+                UI.tableZendeskQueue.innerHTML = `<tr><td colspan="6" style="text-align:center; color: var(--text-muted); padding: 2rem;">No unassigned tickets right now.</td></tr>`;
                 return;
             }
 
@@ -2408,9 +2533,11 @@
                 const requesterName = zendeskRequesterMap[t.requester_id] || `Requester #${t.requester_id}`;
                 const priority = t.priority || 'normal';
                 const createdDisplay = formatZendeskTimestamp(t.created_at);
+                const checked = zendeskSelectedIds.has(t.id) ? 'checked' : '';
 
                 UI.tableZendeskQueue.insertAdjacentHTML('beforeend', `
                     <tr id="zendesk-row-${t.id}">
+                        <td><input type="checkbox" class="zendesk-select-checkbox" data-id="${t.id}" ${checked}></td>
                         <td class="ticket-subject-cell">
                             <div style="display:flex; align-items:flex-start; gap:0.4rem;">
                                 <button class="btn-icon" title="View customer message" onclick="window.toggleZendeskMessage(${t.id})">
@@ -2437,19 +2564,233 @@
             });
         }
 
-        window.toggleZendeskMessage = function(ticketId) {
-            const existing = document.getElementById(`zendesk-detail-${ticketId}`);
+        function toggleMessageRow(rowId, detailId, colspan, text) {
+            const existing = document.getElementById(detailId);
             if (existing) { existing.remove(); return; }
 
-            const row = document.getElementById(`zendesk-row-${ticketId}`);
-            const ticket = zendeskQueueCache.find(t => t.id === ticketId);
-            if (!row || !ticket) return;
+            const row = document.getElementById(rowId);
+            if (!row) return;
 
             row.insertAdjacentHTML('afterend', `
-                <tr id="zendesk-detail-${ticketId}">
-                    <td colspan="5"><div class="summary-box">${escapeHtml(ticket.description || '(no message content)')}</div></td>
+                <tr id="${detailId}">
+                    <td colspan="${colspan}"><div class="summary-box">${escapeHtml(text || '(no message content)')}</div></td>
                 </tr>
             `);
+        }
+
+        window.toggleZendeskMessage = function(ticketId) {
+            const ticket = zendeskQueueCache.find(t => t.id === ticketId);
+            if (!ticket) return;
+            toggleMessageRow(`zendesk-row-${ticketId}`, `zendesk-detail-${ticketId}`, 6, ticket.description);
+        };
+
+        function updateBulkSendIrToolbar() {
+            const count = zendeskSelectedIds.size;
+            UI.zendeskSelectedCount.innerText = count > 0 ? `${count} selected` : '';
+            UI.btnBulkSendIr.disabled = count === 0;
+        }
+
+        window.openBulkSendIrModal = function() {
+            const count = zendeskSelectedIds.size;
+            if (count === 0) return;
+            UI.bulkIrSubject.innerText = `Sending to ${count} selected ticket${count === 1 ? '' : 's'} — this will NOT assign them, they stay in Unassigned.`;
+            UI.bulkIrDraft.value = (State.settings.irTemplate || '').trim();
+            UI.modalBulkSendIr.classList.add('active');
+        };
+
+        window.confirmBulkSendIr = async function() {
+            const text = UI.bulkIrDraft.value.trim();
+            if (!text) return notify("Write a message before sending.");
+
+            const ids = Array.from(zendeskSelectedIds);
+            if (ids.length === 0) return notify("No tickets selected.");
+
+            const zd = State.settings.zendesk;
+            const actingEmail = resolveZendeskActingEmail();
+            let successCount = 0;
+            let failCount = 0;
+
+            for (const id of ids) {
+                try {
+                    const target = `https://${zd.subdomain}.zendesk.com/api/v2/tickets/${id}.json`;
+                    const res = await zendeskFetch(target, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ ticket: { comment: { body: text, public: true } } })
+                    }, actingEmail);
+                    if (res.ok) successCount++; else failCount++;
+                } catch (err) {
+                    console.error(err);
+                    failCount++;
+                }
+            }
+
+            if (successCount > 0) {
+                logActivity('Zendesk Queue', `sent a bulk initial response to ${successCount} unassigned ticket${successCount === 1 ? '' : 's'}`);
+                State.commit();
+                syncUI();
+            }
+
+            zendeskSelectedIds.clear();
+            UI.zendeskSelectAll.checked = false;
+            renderZendeskQueueTable();
+            updateBulkSendIrToolbar();
+
+            window.closeModals();
+            notify(failCount === 0
+                ? `Sent initial response to ${successCount} ticket${successCount === 1 ? '' : 's'}.`
+                : `Sent to ${successCount}, failed for ${failCount} — check the console.`);
+        };
+
+        window.switchZendeskTab = function(tab) {
+            const isUnassigned = tab === 'unassigned';
+            UI.tabZendeskUnassigned.classList.toggle('btn-primary', isUnassigned);
+            UI.tabZendeskUnassigned.classList.toggle('btn-outline', !isUnassigned);
+            UI.tabZendeskSuspended.classList.toggle('btn-primary', !isUnassigned);
+            UI.tabZendeskSuspended.classList.toggle('btn-outline', isUnassigned);
+            UI.panelZendeskUnassigned.classList.toggle('hidden', !isUnassigned);
+            UI.panelZendeskSuspended.classList.toggle('hidden', isUnassigned);
+
+            if (isUnassigned) {
+                fetchUnassignedZendeskTickets();
+            } else {
+                fetchSuspendedZendeskTickets();
+            }
+        };
+
+        function refreshActiveZendeskTab() {
+            if (UI.panelZendeskUnassigned.classList.contains('hidden')) {
+                fetchSuspendedZendeskTickets();
+            } else {
+                fetchUnassignedZendeskTickets();
+            }
+        }
+
+        async function fetchSuspendedZendeskTickets() {
+            const zd = State.settings.zendesk;
+            if (!zd || !zd.subdomain || !zd.email || !zd.apiToken || !zd.proxyUrl) {
+                UI.tableZendeskSuspended.innerHTML = `<tr><td colspan="5" style="text-align:center; color: var(--text-muted); padding: 2rem;">Configure Zendesk in <a href="admin.html">admin.html</a>, then click Refresh.</td></tr>`;
+                UI.statZendeskSuspended.innerText = '0';
+                return;
+            }
+
+            UI.zendeskSuspendedStatus.innerText = 'Loading…';
+            UI.tableZendeskSuspended.innerHTML = `<tr><td colspan="5" style="text-align:center; color: var(--text-muted); padding: 2rem;">Loading suspended tickets from Zendesk…</td></tr>`;
+
+            try {
+                const target = `https://${zd.subdomain}.zendesk.com/api/v2/suspended_tickets.json`;
+                const res = await zendeskFetch(target, { method: 'GET' });
+                if (!res.ok) throw new Error(`Zendesk returned ${res.status}`);
+                const data = await res.json();
+
+                zendeskSuspendedCache = data.suspended_tickets || [];
+                renderSuspendedQueueTable();
+                UI.zendeskSuspendedStatus.innerText = `Updated ${getFormattedTime()}`;
+            } catch (err) {
+                console.error(err);
+                UI.zendeskSuspendedStatus.innerText = '';
+                UI.tableZendeskSuspended.innerHTML = `<tr><td colspan="5" style="text-align:center; color: #f43f5e; padding: 2rem;">Couldn't load suspended tickets. Check Zendesk settings in admin.html and the console.</td></tr>`;
+                notify("Failed to load suspended tickets.");
+            }
+        }
+
+        function renderSuspendedQueueTable() {
+            UI.statZendeskSuspended.innerText = zendeskSuspendedCache.length;
+            UI.tableZendeskSuspended.innerHTML = '';
+
+            if (zendeskSuspendedCache.length === 0) {
+                UI.tableZendeskSuspended.innerHTML = `<tr><td colspan="5" style="text-align:center; color: var(--text-muted); padding: 2rem;">No suspended tickets right now.</td></tr>`;
+                return;
+            }
+
+            zendeskSuspendedCache.forEach(t => {
+                const author = t.author || {};
+                const requesterName = author.name || author.email || 'Unknown';
+                const cause = t.cause || '(no reason given)';
+                const createdDisplay = formatZendeskTimestamp(t.created_at);
+
+                UI.tableZendeskSuspended.insertAdjacentHTML('beforeend', `
+                    <tr id="suspended-row-${t.id}">
+                        <td class="ticket-subject-cell">
+                            <div style="display:flex; align-items:flex-start; gap:0.4rem;">
+                                <button class="btn-icon" title="View customer message" onclick="window.toggleSuspendedMessage(${t.id})">
+                                    <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                                </button>
+                                <div>
+                                    <span class="subj">#${t.id} &mdash; ${escapeHtml(t.subject || '(no subject)')}</span>
+                                    <span class="req">${escapeHtml(requesterName)}</span>
+                                </div>
+                            </div>
+                        </td>
+                        <td style="color: var(--text-muted); font-size: 0.85rem;">${escapeHtml(cause)}</td>
+                        <td style="color: var(--text-muted);">${createdDisplay}</td>
+                        <td><span class="badge-shift zendesk-age" data-created="${escapeHtml(t.created_at || '')}">${escapeHtml(formatZendeskAge(t.created_at))}</span></td>
+                        <td style="text-align: right;">
+                            <div class="zendesk-row-actions">
+                                <button class="btn btn-outline" style="padding: 0.4rem 0.9rem; font-size: 0.8rem;" onclick="window.openSuspendedSummaryModal(${t.id})">Summarize</button>
+                                <button class="btn btn-primary" style="padding: 0.4rem 0.9rem; font-size: 0.8rem;" onclick="window.recoverSuspendedTicket(${t.id})">Recover</button>
+                            </div>
+                        </td>
+                    </tr>
+                `);
+            });
+        }
+
+        window.toggleSuspendedMessage = function(ticketId) {
+            const ticket = zendeskSuspendedCache.find(t => t.id === ticketId);
+            if (!ticket) return;
+            toggleMessageRow(`suspended-row-${ticketId}`, `suspended-detail-${ticketId}`, 5, ticket.content);
+        };
+
+        window.openSuspendedSummaryModal = async function(ticketId) {
+            const ticket = zendeskSuspendedCache.find(t => t.id === ticketId);
+            if (!ticket) return;
+
+            UI.summaryModalSubject.innerText = `#${ticket.id} — ${ticket.subject || '(no subject)'}`;
+            UI.summaryModalBody.innerText = 'Summarizing…';
+            UI.modalTicketSummary.classList.add('active');
+
+            const ai = State.settings.ai;
+            if (!ai || !ai.apiKey) {
+                UI.summaryModalBody.innerText = 'No AI API key configured. Set one up in admin.html.';
+                return;
+            }
+
+            try {
+                const model = ai.model || 'gemini-2.0-flash';
+                const prompt = `Summarize this suspended (spam-flagged) support ticket in 2-3 short sentences to help decide whether it's worth recovering. Focus on what the message wants and whether it looks legitimate.\n\nSubject: ${ticket.subject || ''}\n\nContent: ${ticket.content || '(no content)'}`;
+                const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${ai.apiKey}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+                });
+                if (!res.ok) throw new Error(`Gemini returned ${res.status}`);
+                const data = await res.json();
+                const text = data.candidates && data.candidates[0] && data.candidates[0].content
+                    && data.candidates[0].content.parts && data.candidates[0].content.parts[0]
+                    && data.candidates[0].content.parts[0].text;
+                UI.summaryModalBody.innerText = (text || 'No summary returned.').trim();
+            } catch (err) {
+                console.error(err);
+                UI.summaryModalBody.innerText = 'Could not generate a summary — check the AI settings and console.';
+            }
+        };
+
+        window.recoverSuspendedTicket = async function(ticketId) {
+            const zd = State.settings.zendesk;
+            try {
+                const target = `https://${zd.subdomain}.zendesk.com/api/v2/suspended_tickets/${ticketId}/recover.json`;
+                const res = await zendeskFetch(target, { method: 'PUT' }, resolveZendeskActingEmail());
+                if (!res.ok) throw new Error(`Zendesk returned ${res.status}`);
+
+                zendeskSuspendedCache = zendeskSuspendedCache.filter(t => t.id !== ticketId);
+                renderSuspendedQueueTable();
+                notify(`Ticket #${ticketId} recovered — refreshing Unassigned.`);
+                await fetchUnassignedZendeskTickets();
+            } catch (err) {
+                console.error(err);
+                notify("Failed to recover the ticket — check the console.");
+            }
         };
 
         function formatZendeskTimestamp(isoString) {
@@ -2636,7 +2977,7 @@
 
             try {
                 const model = ai.model || 'gemini-2.0-flash';
-                const prompt = `Write an initial support response reply to a customer.${template ? `\n\nUse this template as a style and structure guide (write natural text, do not include literal placeholder syntax in the output):\n---\n${template}\n---` : ''}\n\nAgent name: ${agent.name}\nCustomer name: ${requesterName}\nTicket subject: ${ticket.subject || ''}\nCustomer's message: ${ticket.description || '(no description)'}\n\nWrite only the reply text, ready to send as-is, addressed to ${requesterName}, acknowledging their issue. Keep it warm, professional, and concise. Do not include a subject line.`;
+                const prompt = `Write an initial support response reply to a customer.${template ? `\n\nHere is the required template:\n---\n${template}\n---\nClosely follow this template's structure, greeting, tone, and phrasing. Reuse it near-verbatim. Only change the parts that must reflect this specific customer's name and issue -- do not rewrite it into different wording, and do not include literal placeholder syntax (like {{name}}) in the output.` : ''}\n\nAgent name: ${agent.name}\nCustomer name: ${requesterName}\nTicket subject: ${ticket.subject || ''}\nCustomer's message: ${ticket.description || '(no description)'}\n\nWrite only the reply text, ready to send as-is, addressed to ${requesterName}, acknowledging their issue. Do not include a subject line.`;
                 const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${ai.apiKey}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -2720,7 +3061,7 @@
             if(clickedNav.dataset.target === 'view-assign') {
                 updateChart();
             } else if (clickedNav.dataset.target === 'view-zendesk-queue') {
-                fetchUnassignedZendeskTickets();
+                refreshActiveZendeskTab();
             }
         }
 
