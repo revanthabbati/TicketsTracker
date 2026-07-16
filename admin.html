@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Integration Settings &mdash; Tickets Assignment Tracker</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="styles.css" rel="stylesheet">
+
+    <style>
+        body { overflow-y: auto; height: auto; min-height: 100vh; }
+    </style>
+</head>
+<body>
+
+    <div id="admin-login-screen" class="login-wrapper">
+        <div class="login-card">
+            <div class="login-brand">
+                <svg width="28" height="28" fill="none" stroke="#fff" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+            </div>
+            <h2>Admin Access</h2>
+            <p>Sign in to manage integration settings</p>
+            <form id="form-admin-login">
+                <div class="input-group">
+                    <label>Email Address</label>
+                    <input type="email" id="admin-login-email" class="input-control" placeholder="admin@dispatchtrack.com" required autocomplete="off">
+                </div>
+                <div class="input-group">
+                    <label>Password</label>
+                    <input type="password" id="admin-login-password" class="input-control" placeholder="••••••••" required autocomplete="off">
+                </div>
+                <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 0.5rem; padding: 1rem;">Sign In</button>
+            </form>
+        </div>
+    </div>
+
+    <div id="admin-shell" class="admin-shell hidden">
+        <div class="view-header-flex" style="margin-bottom: 2rem;">
+            <div class="page-title">
+                <h1>Integration Settings</h1>
+                <p>Configure the Zendesk connection and AI summarization used by the Zendesk Queue.</p>
+            </div>
+            <button type="button" class="btn btn-outline" id="btn-admin-logout" style="padding: 0.6rem 1.25rem; font-size: 0.85rem;">Log Out</button>
+        </div>
+
+        <div class="panel">
+            <div class="panel-header">
+                <h2>Zendesk API</h2>
+                <button type="button" class="btn btn-outline" id="btn-test-zendesk" style="padding: 0.4rem 1rem; font-size: 0.8rem;">Test Connection</button>
+            </div>
+            <div class="panel-body">
+                <form id="form-zendesk">
+                    <div class="input-group">
+                        <label>Zendesk Subdomain</label>
+                        <input type="text" id="zd-subdomain" class="input-control" placeholder="e.g. dispatchtrack" required autocomplete="off">
+                        <span class="input-hint">Enter just the subdomain (e.g. <em>dispatchtrack</em>) &mdash; not the full .zendesk.com URL.</span>
+                    </div>
+                    <div class="input-group">
+                        <label>Agent Email</label>
+                        <input type="email" id="zd-email" class="input-control" placeholder="agent@dispatchtrack.com" required autocomplete="off">
+                    </div>
+                    <div class="input-group">
+                        <label>API Token</label>
+                        <input type="password" id="zd-token" class="input-control" placeholder="Zendesk API token" required autocomplete="off">
+                        <span class="input-hint">Admin Center &rarr; Apps and integrations &rarr; Zendesk API &rarr; Settings &rarr; API token</span>
+                    </div>
+                    <div class="input-group">
+                        <label>Cloudflare Proxy URL</label>
+                        <input type="url" id="zd-proxy" class="input-control" placeholder="https://your-worker.workers.dev/" required autocomplete="off">
+                        <span class="input-hint">Deploy <code>worker.js</code> to Cloudflare Workers (free) to bypass Zendesk CORS.</span>
+                    </div>
+                    <button type="submit" class="btn btn-primary" style="width: 100%;">Save Zendesk Settings</button>
+                </form>
+            </div>
+        </div>
+
+        <div class="section-divider">AI Summarization</div>
+
+        <div class="panel">
+            <div class="panel-header">
+                <h2>Gemini API</h2>
+                <button type="button" class="btn btn-outline" id="btn-test-gemini" style="padding: 0.4rem 1rem; font-size: 0.8rem;">Test Connection</button>
+            </div>
+            <div class="panel-body">
+                <form id="form-ai">
+                    <div class="input-group">
+                        <label>Gemini API Key</label>
+                        <input type="password" id="ai-key" class="input-control" placeholder="Google AI Studio API key" required autocomplete="off">
+                        <span class="input-hint">aistudio.google.com &rarr; Get API key</span>
+                    </div>
+                    <div class="input-group">
+                        <label>Model</label>
+                        <input type="text" id="ai-model" class="input-control" placeholder="gemini-2.0-flash">
+                        <span class="input-hint">Leave as default unless you need a different Gemini model.</span>
+                    </div>
+                    <button type="submit" class="btn btn-primary" style="width: 100%;">Save AI Settings</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast-container"></div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
+        import { getFirestore, doc, onSnapshot, updateDoc, setDoc } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyBmlL7onUcn8Cne3DsBM72gbskWihq7i5Y",
+            authDomain: "routerpro-bbf42.firebaseapp.com",
+            projectId: "routerpro-bbf42",
+            storageBucket: "routerpro-bbf42.firebasestorage.app",
+            messagingSenderId: "960264510058",
+            appId: "1:960264510058:web:6e6b99eb1358f43189c813",
+            measurementId: "G-SKDHRKYNXG"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const docRef = doc(db, "routerpro", "system_state");
+
+        document.documentElement.setAttribute('data-theme', localStorage.getItem('ent_v10_theme') || 'dark');
+
+        // Hardcoded admin login for this settings page only (independent of the
+        // tracker's own Firestore-backed user list). Password is never stored or
+        // compared in plaintext -- only its SHA-256 hash is hardcoded here, and
+        // the entered password is hashed client-side before comparison.
+        const ADMIN_EMAIL = 'revanth.abbati@dispatchtrack.com';
+        const ADMIN_PASSWORD_HASH = 'f9e4efd9d466aa20b08e297a674f9ff77a9e714ccc656a4fff7ab9772a276afb';
+        const ADMIN_SESSION_KEY = 'admin_settings_authed';
+
+        async function sha256Hex(text) {
+            const bytes = new TextEncoder().encode(text);
+            const hashBuffer = await crypto.subtle.digest('SHA-256', bytes);
+            return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
+        }
+
+        const elLoginScreen = document.getElementById('admin-login-screen');
+        const elAdminShell = document.getElementById('admin-shell');
+        const formAdminLogin = document.getElementById('form-admin-login');
+
+        if (sessionStorage.getItem(ADMIN_SESSION_KEY) === 'true') {
+            showAdminShell();
+        }
+
+        formAdminLogin.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const emailInput = document.getElementById('admin-login-email');
+            const passInput = document.getElementById('admin-login-password');
+            const email = emailInput.value.trim().toLowerCase();
+            const passHash = await sha256Hex(passInput.value);
+
+            if (email === ADMIN_EMAIL && passHash === ADMIN_PASSWORD_HASH) {
+                sessionStorage.setItem(ADMIN_SESSION_KEY, 'true');
+                passInput.value = '';
+                showAdminShell();
+            } else {
+                notify('Invalid email or password.');
+            }
+        });
+
+        document.getElementById('btn-admin-logout').addEventListener('click', () => {
+            sessionStorage.removeItem(ADMIN_SESSION_KEY);
+            elAdminShell.classList.add('hidden');
+            elLoginScreen.classList.remove('hidden');
+        });
+
+        function showAdminShell() {
+            elLoginScreen.classList.add('hidden');
+            elAdminShell.classList.remove('hidden');
+            if (!window.adminBooted) {
+                window.adminBooted = true;
+                boot();
+            }
+        }
+
+        function notify(message) {
+            const box = document.getElementById('toast-container');
+            const t = document.createElement('div');
+            t.className = 'toast';
+            t.innerHTML = message;
+            box.appendChild(t);
+            setTimeout(() => { if (t.parentElement) t.remove(); }, 3500);
+        }
+
+        function boot() {
+            const formZendesk = document.getElementById('form-zendesk');
+            const formAi = document.getElementById('form-ai');
+            const zdSubdomain = document.getElementById('zd-subdomain');
+            const zdEmail = document.getElementById('zd-email');
+            const zdToken = document.getElementById('zd-token');
+            const zdProxy = document.getElementById('zd-proxy');
+            const aiKey = document.getElementById('ai-key');
+            const aiModel = document.getElementById('ai-model');
+
+            onSnapshot(docRef, (snapshot) => {
+                const data = snapshot.exists() ? snapshot.data() : {};
+                const settings = data.settings || {};
+                const zd = settings.zendesk || {};
+                const ai = settings.ai || {};
+
+                if (document.activeElement !== zdSubdomain) zdSubdomain.value = zd.subdomain || '';
+                if (document.activeElement !== zdEmail) zdEmail.value = zd.email || '';
+                if (document.activeElement !== zdToken) zdToken.value = zd.apiToken || '';
+                if (document.activeElement !== zdProxy) zdProxy.value = zd.proxyUrl || '';
+                if (document.activeElement !== aiKey) aiKey.value = ai.apiKey || '';
+                if (document.activeElement !== aiModel) aiModel.value = ai.model || 'gemini-2.0-flash';
+            });
+
+            formZendesk.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const value = {
+                    subdomain: zdSubdomain.value.trim(),
+                    email: zdEmail.value.trim(),
+                    apiToken: zdToken.value.trim(),
+                    proxyUrl: zdProxy.value.trim().replace(/\/+$/, '')
+                };
+                await saveSettingsField('zendesk', value);
+                notify('Zendesk settings saved.');
+            });
+
+            formAi.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const value = {
+                    provider: 'gemini',
+                    apiKey: aiKey.value.trim(),
+                    model: aiModel.value.trim() || 'gemini-2.0-flash'
+                };
+                await saveSettingsField('ai', value);
+                notify('AI settings saved.');
+            });
+
+            document.getElementById('btn-test-zendesk').addEventListener('click', testZendeskConnection);
+            document.getElementById('btn-test-gemini').addEventListener('click', testGeminiConnection);
+
+            async function saveSettingsField(key, value) {
+                try {
+                    await updateDoc(docRef, { [`settings.${key}`]: value });
+                } catch (err) {
+                    if (err.code === 'not-found') {
+                        await setDoc(docRef, { settings: { [key]: value } }, { merge: true });
+                    } else {
+                        console.error(err);
+                        notify('Save failed &mdash; see console.');
+                    }
+                }
+            }
+
+            async function testZendeskConnection() {
+                const subdomain = zdSubdomain.value.trim();
+                const email = zdEmail.value.trim();
+                const token = zdToken.value.trim();
+                const proxy = zdProxy.value.trim().replace(/\/+$/, '');
+                if (!subdomain || !email || !token || !proxy) {
+                    return notify('Fill in all Zendesk fields before testing.');
+                }
+                const target = `https://${subdomain}.zendesk.com/api/v2/users/me.json`;
+                const authValue = btoa(`${email}/token:${token}`);
+                try {
+                    const res = await fetch(`${proxy}?target=${encodeURIComponent(target)}`, {
+                        headers: { Authorization: `Basic ${authValue}` }
+                    });
+                    if (res.ok) {
+                        const data = await res.json();
+                        notify(`Connected as ${(data.user && data.user.name) || email}.`);
+                    } else {
+                        notify(`Zendesk returned ${res.status}. Check credentials.`);
+                    }
+                } catch (err) {
+                    console.error(err);
+                    notify('Connection failed &mdash; check the proxy URL and console.');
+                }
+            }
+
+            async function testGeminiConnection() {
+                const key = aiKey.value.trim();
+                const model = aiModel.value.trim() || 'gemini-2.0-flash';
+                if (!key) return notify('Enter a Gemini API key before testing.');
+                try {
+                    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ contents: [{ parts: [{ text: 'Reply with the single word OK.' }] }] })
+                    });
+                    if (res.ok) {
+                        notify('Gemini connection successful.');
+                    } else {
+                        notify(`Gemini returned ${res.status}. Check the API key/model.`);
+                    }
+                } catch (err) {
+                    console.error(err);
+                    notify('Connection failed &mdash; check the console.');
+                }
+            }
+        }
+    </script>
+</body>
+</html>
