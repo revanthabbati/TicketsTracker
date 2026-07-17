@@ -101,6 +101,29 @@
             </div>
         </div>
 
+        <div class="section-divider">Slack Notifications</div>
+
+        <div class="panel">
+            <div class="panel-header">
+                <h2>Slack Bot</h2>
+                <button type="button" class="btn btn-outline" id="btn-test-slack" style="padding: 0.4rem 1rem; font-size: 0.8rem;">Test Connection</button>
+            </div>
+            <div class="panel-body">
+                <form id="form-slack">
+                    <div class="input-group">
+                        <label>Bot Token</label>
+                        <input type="password" id="slack-token" class="input-control" placeholder="xoxb-..." required autocomplete="off">
+                        <span class="input-hint">
+                            api.slack.com/apps &rarr; Create New App &rarr; From scratch &rarr; OAuth &amp; Permissions &rarr; add
+                            <code>chat:write</code> and <code>im:write</code> Bot Token Scopes &rarr; Install to Workspace &rarr; copy the
+                            <em>Bot User OAuth Token</em>. Sent through the same Cloudflare Worker proxy as Zendesk, so that must be configured above first.
+                        </span>
+                    </div>
+                    <button type="submit" class="btn btn-primary" style="width: 100%;">Save Slack Settings</button>
+                </form>
+            </div>
+        </div>
+
         <div class="section-divider">Initial Response</div>
 
         <div class="panel">
@@ -215,12 +238,15 @@
             const aiModel = document.getElementById('ai-model');
             const formIrTemplate = document.getElementById('form-ir-template');
             const irTemplateText = document.getElementById('ir-template-text');
+            const formSlack = document.getElementById('form-slack');
+            const slackToken = document.getElementById('slack-token');
 
             onSnapshot(docRef, (snapshot) => {
                 const data = snapshot.exists() ? snapshot.data() : {};
                 const settings = data.settings || {};
                 const zd = settings.zendesk || {};
                 const ai = settings.ai || {};
+                const slack = settings.slack || {};
 
                 if (document.activeElement !== zdSubdomain) zdSubdomain.value = zd.subdomain || '';
                 if (document.activeElement !== zdEmail) zdEmail.value = zd.email || '';
@@ -229,6 +255,7 @@
                 if (document.activeElement !== aiKey) aiKey.value = ai.apiKey || '';
                 if (document.activeElement !== aiModel) aiModel.value = ai.model || 'gemini-2.0-flash';
                 if (document.activeElement !== irTemplateText) irTemplateText.value = settings.irTemplate || '';
+                if (document.activeElement !== slackToken) slackToken.value = slack.botToken || '';
             });
 
             formZendesk.addEventListener('submit', async (e) => {
@@ -260,8 +287,15 @@
                 notify('Initial Response template saved.');
             });
 
+            formSlack.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                await saveSettingsField('slack', { botToken: slackToken.value.trim() });
+                notify('Slack settings saved.');
+            });
+
             document.getElementById('btn-test-zendesk').addEventListener('click', testZendeskConnection);
             document.getElementById('btn-test-gemini').addEventListener('click', testGeminiConnection);
+            document.getElementById('btn-test-slack').addEventListener('click', testSlackConnection);
 
             async function saveSettingsField(key, value) {
                 try {
@@ -295,6 +329,30 @@
                         notify(`Connected as ${(data.user && data.user.name) || email}.`);
                     } else {
                         notify(`Zendesk returned ${res.status}. Check credentials.`);
+                    }
+                } catch (err) {
+                    console.error(err);
+                    notify('Connection failed &mdash; check the proxy URL and console.');
+                }
+            }
+
+            async function testSlackConnection() {
+                const token = slackToken.value.trim();
+                const proxy = zdProxy.value.trim().replace(/\/+$/, '');
+                if (!token) return notify('Enter a Slack Bot Token before testing.');
+                if (!proxy) return notify('Set the Cloudflare Proxy URL in Zendesk API first — Slack calls reuse it.');
+                try {
+                    const target = 'https://slack.com/api/auth.test';
+                    const res = await fetch(`${proxy}?target=${encodeURIComponent(target)}`, {
+                        method: 'POST',
+                        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json; charset=utf-8' },
+                        body: JSON.stringify({})
+                    });
+                    const data = await res.json();
+                    if (data.ok) {
+                        notify(`Connected to Slack as ${data.user || data.bot_id || 'bot'} in ${data.team || 'workspace'}.`);
+                    } else {
+                        notify(`Slack error: ${data.error || res.status}.`);
                     }
                 } catch (err) {
                     console.error(err);

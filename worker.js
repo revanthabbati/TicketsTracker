@@ -1,24 +1,26 @@
 /**
- * Zendesk CORS proxy for the Tickets Assignment Tracker.
+ * CORS proxy for the Tickets Assignment Tracker (Zendesk + Slack).
  *
- * Zendesk's API doesn't send CORS headers, so a browser calling it directly
- * from a static page (GitHub Pages, Firebase Hosting, etc.) gets blocked.
- * This worker sits in front of Zendesk, forwards the request, and adds the
+ * Neither Zendesk's nor Slack's Web API sends CORS headers, so a browser calling
+ * them directly from a static page (GitHub Pages, Firebase Hosting, etc.) gets
+ * blocked. This worker sits in front of both, forwards the request, and adds the
  * CORS headers back onto the response.
  *
  * Deploy (Cloudflare dashboard):
  *   1. workers.cloudflare.com -> Create Application -> Create Worker
  *   2. Paste this file's contents into the editor, replacing the template
  *   3. Deploy, copy the workers.dev URL it gives you
- *   4. Paste that URL into admin.html's "Cloudflare Proxy URL" field
+ *   4. Paste that URL into admin.html's "Cloudflare Proxy URL" field (used for both
+ *      the Zendesk API and Slack sections)
  *
  * Deploy (wrangler CLI):
  *   npx wrangler deploy worker.js
  *
  * Request contract:
- *   GET/POST/PUT/PATCH/DELETE {workerUrl}?target=<url-encoded full Zendesk API URL>
- *   Authorization header is forwarded through untouched (Zendesk Basic Auth token).
- *   Only requests targeting *.zendesk.com are forwarded.
+ *   GET/POST/PUT/PATCH/DELETE {workerUrl}?target=<url-encoded full API URL>
+ *   Authorization header is forwarded through untouched (Zendesk Basic Auth token,
+ *   or Slack "Bearer <bot token>").
+ *   Only requests targeting *.zendesk.com or slack.com are forwarded.
  */
 
 const CORS_HEADERS = {
@@ -47,8 +49,8 @@ export default {
             return jsonError('Invalid "target" URL.', 400);
         }
 
-        if (!targetUrl.hostname.endsWith('.zendesk.com')) {
-            return jsonError('This proxy only forwards requests to *.zendesk.com.', 403);
+        if (!isAllowedHost(targetUrl.hostname)) {
+            return jsonError('This proxy only forwards requests to *.zendesk.com or slack.com.', 403);
         }
 
         const forwardHeaders = new Headers();
@@ -74,6 +76,10 @@ export default {
         });
     },
 };
+
+function isAllowedHost(hostname) {
+    return hostname.endsWith('.zendesk.com') || hostname === 'slack.com';
+}
 
 function jsonError(message, status) {
     return new Response(JSON.stringify({ error: message }), {

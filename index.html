@@ -316,6 +316,11 @@
                                         <input type="url" id="input-agent-slack" class="input-control" placeholder="https://app.slack.com/client/..." autocomplete="off">
                                     </div>
                                     <div class="input-group">
+                                        <label>Slack Member ID (Optional)</label>
+                                        <input type="text" id="input-agent-slack-id" class="input-control" placeholder="U0123ABC456" autocomplete="off">
+                                        <span class="input-hint">Needed to send the automatic Slack assignment message. Find it via their Slack profile &rarr; &#8942; &rarr; Copy member ID.</span>
+                                    </div>
+                                    <div class="input-group">
                                         <label>Zendesk Agent Email (Optional)</label>
                                         <input type="email" id="input-agent-zendesk" class="input-control" placeholder="agent@dispatchtrack.com" autocomplete="off">
                                         <span class="input-hint">Needed to assign Zendesk Queue tickets to this agent.</span>
@@ -658,6 +663,11 @@
                 <div class="input-group">
                     <label>Slack Profile URL (Optional)</label>
                     <input type="url" id="edit-agent-slack" class="input-control" placeholder="https://app.slack.com/client/..." autocomplete="off">
+                </div>
+                <div class="input-group">
+                    <label>Slack Member ID (Optional)</label>
+                    <input type="text" id="edit-agent-slack-id" class="input-control" placeholder="U0123ABC456" autocomplete="off">
+                    <span class="input-hint">Needed to send the automatic Slack assignment message. Find it via their Slack profile &rarr; &#8942; &rarr; Copy member ID.</span>
                 </div>
                 <div class="input-group">
                     <label>Zendesk Agent Email (Optional)</label>
@@ -1034,6 +1044,7 @@
             inputAgentRole: document.getElementById('input-agent-role'),
             inputAgentPic: document.getElementById('input-agent-pic'),
             inputAgentSlack: document.getElementById('input-agent-slack'),
+            inputAgentSlackId: document.getElementById('input-agent-slack-id'),
             inputAgentZendesk: document.getElementById('input-agent-zendesk'),
             tableAgents: document.getElementById('table-agents'),
             rosterGrid: document.getElementById('roster-grid'),
@@ -1088,6 +1099,7 @@
             editAgentRole: document.getElementById('edit-agent-role'),
             editAgentPic: document.getElementById('edit-agent-pic'),
             editAgentSlack: document.getElementById('edit-agent-slack'),
+            editAgentSlackId: document.getElementById('edit-agent-slack-id'),
             editAgentZendesk: document.getElementById('edit-agent-zendesk'),
 
             modalDeleteAgent: document.getElementById('modal-delete-agent'),
@@ -1476,6 +1488,7 @@
                 UI.editAgentRole.value = agent.role || 'support';
                 UI.editAgentPic.value = agent.profilePic || '';
                 UI.editAgentSlack.value = agent.slackUrl || '';
+                UI.editAgentSlackId.value = agent.slackMemberId || '';
                 UI.editAgentZendesk.value = agent.zendeskEmail || '';
                 UI.modalEditAgent.classList.add('active');
             }
@@ -1500,6 +1513,7 @@
                 agent.role = UI.editAgentRole.value;
                 agent.profilePic = UI.editAgentPic.value.trim();
                 agent.slackUrl = UI.editAgentSlack.value.trim();
+                agent.slackMemberId = UI.editAgentSlackId.value.trim();
                 agent.zendeskEmail = UI.editAgentZendesk.value.trim();
                 State.commit();
                 syncUI();
@@ -1833,6 +1847,7 @@
             const role = UI.inputAgentRole.value;
             const pic = UI.inputAgentPic.value.trim();
             const slack = UI.inputAgentSlack.value.trim();
+            const slackMemberId = UI.inputAgentSlackId.value.trim();
             const zendeskEmail = UI.inputAgentZendesk.value.trim();
 
             if (name) {
@@ -1842,6 +1857,7 @@
                     role: role,
                     profilePic: pic,
                     slackUrl: slack,
+                    slackMemberId: slackMemberId,
                     zendeskEmail: zendeskEmail,
                     total: 0,
                     isAvailable: true,
@@ -1850,6 +1866,7 @@
                 UI.inputAgent.value = '';
                 UI.inputAgentPic.value = '';
                 UI.inputAgentSlack.value = '';
+                UI.inputAgentSlackId.value = '';
                 UI.inputAgentZendesk.value = '';
                 logActivity(name, `joined the active Agent List.`);
                 State.commit();
@@ -1940,17 +1957,49 @@
             return -1;
         }
 
-        function handleSlackRedirect(action, agent) {
-            if (action === 'slack') {
-                const slackUrl = agent.slackUrl || 'https://app.slack.com/client/T22B28XU1';
-                window.open(slackUrl, '_blank');
-                notify(`Logged & redirected to Slack`);
+        // Sends a Slack DM to the agent announcing their new ticket assignment, instead of
+        // just opening a Slack tab. Routes through the same Cloudflare Worker proxy used for
+        // Zendesk, since Slack's Web API doesn't allow direct browser calls (CORS).
+        async function sendSlackAssignmentMessage(action, agent, ticketLink) {
+            if (action !== 'slack') return false;
+
+            if (!agent.slackMemberId) {
+                notify(`${agent.name} has no Slack Member ID set — add one in Manage Agents.`);
                 return true;
             }
-            return false;
+
+            const slack = State.settings.slack;
+            const zd = State.settings.zendesk;
+            if (!slack || !slack.botToken || !zd || !zd.proxyUrl) {
+                notify('Slack isn\'t configured yet — set a Bot Token in admin.html.');
+                return true;
+            }
+
+            try {
+                const proxyUrl = zd.proxyUrl.replace(/\/+$/, '');
+                const target = 'https://slack.com/api/chat.postMessage';
+                const res = await fetch(`${proxyUrl}?target=${encodeURIComponent(target)}`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${slack.botToken}`,
+                        'Content-Type': 'application/json; charset=utf-8'
+                    },
+                    body: JSON.stringify({
+                        channel: agent.slackMemberId,
+                        text: `:memo: You've been assigned a new ticket: ${ticketLink}`
+                    })
+                });
+                const data = await res.json();
+                if (!data.ok) throw new Error(data.error || 'unknown Slack error');
+                notify(`Slack message sent to ${agent.name}`);
+            } catch (err) {
+                console.error(err);
+                notify(`Couldn't send Slack message to ${agent.name} — check the console.`);
+            }
+            return true;
         }
 
-        function processTicketAssignment(e) {
+        async function processTicketAssignment(e) {
             e.preventDefault();
             const action = e.submitter ? e.submitter.value : 'assign';
             const link = UI.inputTicket.value.trim();
@@ -1990,16 +2039,16 @@
             logActivity(currAgent.name, `was assigned to ${shortTicket}`);
             
             UI.inputTicket.value = '';
-            UI.overrideAgentSelect.value = ''; 
+            UI.overrideAgentSelect.value = '';
             State.commit();
             syncUI();
 
-            if (!handleSlackRedirect(action, currAgent)) {
+            if (!(await sendSlackAssignmentMessage(action, currAgent, link))) {
                 notify(`Assigned to ${currAgent.name}`);
             }
         }
 
-        function processCseAssignment(e) {
+        async function processCseAssignment(e) {
             e.preventDefault();
             const action = e.submitter ? e.submitter.value : 'assign';
             const link = UI.inputCseTicket.value.trim();
@@ -2027,13 +2076,13 @@
             UI.inputCseTicket.value = '';
             State.commit();
             syncUI();
-            
-            if (!handleSlackRedirect(action, currAgent)) {
+
+            if (!(await sendSlackAssignmentMessage(action, currAgent, link))) {
                 notify(`Assigned onboarding to ${currAgent.name}`);
             }
         }
 
-        function processCsmAssignment(e) {
+        async function processCsmAssignment(e) {
             e.preventDefault();
             const action = e.submitter ? e.submitter.value : 'assign';
             const link = UI.inputCsmTicket.value.trim();
@@ -2061,8 +2110,8 @@
             UI.inputCsmTicket.value = '';
             State.commit();
             syncUI();
-            
-            if (!handleSlackRedirect(action, currAgent)) {
+
+            if (!(await sendSlackAssignmentMessage(action, currAgent, link))) {
                 notify(`Assigned to CSM ${currAgent.name}`);
             }
         }
@@ -2892,6 +2941,7 @@
 
             try {
                 const zd = State.settings.zendesk;
+                const ticketLink = `https://${zd.subdomain}.zendesk.com/agent/tickets/${ticket.id}`;
                 const target = `https://${zd.subdomain}.zendesk.com/api/v2/tickets/${ticket.id}.json`;
                 const res = await zendeskFetch(target, {
                     method: 'PUT',
@@ -2904,7 +2954,7 @@
                     id: crypto.randomUUID(),
                     agentId: agent.id,
                     agentName: agent.name,
-                    link: `https://${zd.subdomain}.zendesk.com/agent/tickets/${ticket.id}`,
+                    link: ticketLink,
                     date: new Date().toISOString().split('T')[0],
                     time: getFormattedTime(),
                     zendeskId: ticket.id,
@@ -2919,7 +2969,7 @@
                 renderZendeskQueueTable();
 
                 window.closeModals();
-                if (!handleSlackRedirect(action, agent)) {
+                if (!(await sendSlackAssignmentMessage(action, agent, ticketLink))) {
                     notify(`Assigned Zendesk ticket #${ticket.id} to ${agent.name}`);
                 }
             } catch (err) {
