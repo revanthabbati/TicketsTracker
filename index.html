@@ -831,7 +831,7 @@
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
-        import { getFirestore, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
+        import { getFirestore, doc, setDoc, updateDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 
         // =================================================================================
         // FIREBASE CONFIGURATION
@@ -872,19 +872,41 @@
             queueIdx: 0,
             settings: {},
 
-            async commit() {
+            // Writes ONLY the top-level fields named in `fields` (e.g. commit(['agents'])),
+            // instead of blindly overwriting the whole document every time. This matters
+            // because many browser tabs stay open concurrently -- a tab that hasn't picked
+            // up a very recent edit yet (e.g. someone else just saved settings in admin.html,
+            // or edited a user's zendeskAgentEmail) must not silently revert that edit just
+            // because it happened to commit an unrelated change (like toggling an agent) a
+            // moment later. `settings` is intentionally never included here -- it's owned by
+            // admin.html; this app only ever reads it.
+            async commit(fields) {
                 localStorage.setItem('ent_v14_currUser', JSON.stringify(this.currentUser));
+                if (!fields || fields.length === 0) return;
+
+                const payload = {};
+                fields.forEach(key => {
+                    payload[key] = key === 'activities' ? this.activities.slice(0, 100) : this[key];
+                });
+
                 try {
-                    await setDoc(docRef, {
-                        users: this.users,
-                        agents: this.agents,
-                        tickets: this.tickets,
-                        activities: this.activities.slice(0, 100),
-                        queueIdx: this.queueIdx,
-                        settings: this.settings
-                    });
+                    await updateDoc(docRef, payload);
                 } catch (e) {
-                    console.error("Firebase Sync Error:", e);
+                    if (e.code === 'not-found') {
+                        try {
+                            await setDoc(docRef, {
+                                users: this.users,
+                                agents: this.agents,
+                                tickets: this.tickets,
+                                activities: this.activities.slice(0, 100),
+                                queueIdx: this.queueIdx
+                            }, { merge: true });
+                        } catch (e2) {
+                            console.error("Firebase Sync Error:", e2);
+                        }
+                    } else {
+                        console.error("Firebase Sync Error:", e);
+                    }
                 }
             }
         };
@@ -904,7 +926,7 @@
                         permissions: { manageAgents: true, manageShifts: true, manageTickets: true }
                     }];
                     State.users = dbUsers;
-                    State.commit();
+                    State.commit(['users']);
                 }
 
                 State.users = dbUsers.map(u => ({
@@ -958,7 +980,7 @@
                     role: 'admin',
                     permissions: { manageAgents: true, manageShifts: true, manageTickets: true }
                 }];
-                State.commit().then(() => {
+                State.commit(['users']).then(() => {
                     if (!window.appBooted) {
                         bootApp();
                         window.appBooted = true;
@@ -1219,7 +1241,7 @@
             });
 
             if (stateChanged) {
-                State.commit();
+                State.commit(['agents']);
                 syncUI();
             }
         }
@@ -1350,7 +1372,7 @@
             const user = State.users.find(u => u.email.toLowerCase() === email && u.password === pass);
             if (user) {
                 State.currentUser = user;
-                State.commit();
+                State.commit([]);
                 UI.loginEmail.value = '';
                 UI.loginPass.value = '';
                 launchAuthenticatedApp();
@@ -1362,7 +1384,7 @@
 
         function handleLogout() {
             State.currentUser = null;
-            State.commit();
+            State.commit([]);
             showLogin();
         }
 
@@ -1454,7 +1476,7 @@
                 }
                 
                 ticket.link = newUrl;
-                State.commit();
+                State.commit(['tickets', 'agents', 'activities']);
                 syncUI();
                 window.closeModals();
                 notify("Ticket record updated successfully.");
@@ -1472,7 +1494,7 @@
                 }
                 
                 State.tickets = State.tickets.filter(t => t.id !== id);
-                State.commit();
+                State.commit(['tickets', 'agents']);
                 syncUI();
                 window.closeModals();
                 notify("Ticket record deleted.");
@@ -1515,7 +1537,7 @@
                 agent.slackUrl = UI.editAgentSlack.value.trim();
                 agent.slackMemberId = UI.editAgentSlackId.value.trim();
                 agent.zendeskEmail = UI.editAgentZendesk.value.trim();
-                State.commit();
+                State.commit(['agents']);
                 syncUI();
                 window.closeModals();
                 notify("Agent profile updated.");
@@ -1526,7 +1548,7 @@
             const id = UI.deleteAgentId.value;
             State.agents = State.agents.filter(a => a.id !== id);
             if (State.queueIdx >= State.agents.length) State.queueIdx = 0;
-            State.commit();
+            State.commit(['agents', 'queueIdx']);
             syncUI();
             window.closeModals();
             notify("Agent removed from roster.");
@@ -1579,7 +1601,7 @@
                     manageShifts: UI.editPermShifts.checked,
                     manageTickets: UI.editPermTickets.checked
                 };
-                State.commit();
+                State.commit(['users']);
                 syncUI();
                 window.closeModals();
                 notify("User account updated.");
@@ -1592,7 +1614,7 @@
             const user = State.users.find(u => u.id === id);
             if (user) {
                 user.password = UI.resetPassInput.value.trim();
-                State.commit();
+                State.commit(['users']);
                 window.closeModals();
                 notify(`Password reset for ${user.email.split('@')[0]}.`);
             }
@@ -1601,7 +1623,7 @@
         window.confirmDeleteUser = function() {
             const id = UI.deleteUserId.value;
             State.users = State.users.filter(u => u.id !== id);
-            State.commit();
+            State.commit(['users']);
             syncUI();
             window.closeModals();
             notify("User permanently deleted.");
@@ -1723,8 +1745,8 @@
                         }
                     }
                 }
-                
-                State.commit();
+
+                State.commit(['tickets', 'agents']);
                 syncUI();
                 if(importedCount > 0) {
                     notify(`Imported ${importedCount} historic tickets successfully.`);
@@ -1830,7 +1852,7 @@
                     manageTickets: UI.inputPermTickets.checked
                 }
             });
-            State.commit();
+            State.commit(['users']);
             UI.inputUserEmail.value = '';
             UI.inputUserPass.value = '';
             UI.inputUserZendesk.value = '';
@@ -1869,7 +1891,7 @@
                 UI.inputAgentSlackId.value = '';
                 UI.inputAgentZendesk.value = '';
                 logActivity(name, `joined the active Agent List.`);
-                State.commit();
+                State.commit(['agents', 'activities']);
                 syncUI();
                 notify(`Agent "${name}" added.`);
             }
@@ -1936,9 +1958,9 @@
             }
 
             agent.shifts = newShifts;
-            agent.lastAutoStatus = null; 
-            
-            State.commit();
+            agent.lastAutoStatus = null;
+
+            State.commit(['agents']);
             evaluateAgentShifts(); 
             syncUI();
             
@@ -2040,7 +2062,7 @@
             
             UI.inputTicket.value = '';
             UI.overrideAgentSelect.value = '';
-            State.commit();
+            State.commit(['tickets', 'agents', 'activities', 'queueIdx']);
             syncUI();
 
             if (!(await sendSlackAssignmentMessage(action, currAgent, link))) {
@@ -2072,9 +2094,9 @@
 
             currAgent.total++;
             logActivity(currAgent.name, `was assigned CSE onboarding ${shortTicket}`);
-            
+
             UI.inputCseTicket.value = '';
-            State.commit();
+            State.commit(['tickets', 'agents', 'activities']);
             syncUI();
 
             if (!(await sendSlackAssignmentMessage(action, currAgent, link))) {
@@ -2106,9 +2128,9 @@
 
             currAgent.total++;
             logActivity(currAgent.name, `was assigned CSM ticket ${shortTicket}`);
-            
+
             UI.inputCsmTicket.value = '';
-            State.commit();
+            State.commit(['tickets', 'agents', 'activities']);
             syncUI();
 
             if (!(await sendSlackAssignmentMessage(action, currAgent, link))) {
@@ -2138,7 +2160,7 @@
                 logActivity(skippedAgent.name, `skipped ticket, but no others available.`);
             }
 
-            State.commit();
+            State.commit(['queueIdx', 'activities']);
             syncUI();
             notify(`Skipped ${skippedAgent.name}`);
         }
@@ -2149,7 +2171,7 @@
                 const agent = State.agents.find(a => a.id === id);
                 if (agent) {
                     agent.isAvailable = e.target.checked;
-                    State.commit();
+                    State.commit(['agents']);
                     syncUI();
                     notify(`${agent.name} is now ${agent.isAvailable ? 'Available' : 'Offline'}`);
                 }
@@ -2676,7 +2698,7 @@
 
             if (successCount > 0) {
                 logActivity('Zendesk Queue', `sent a bulk initial response to ${successCount} unassigned ticket${successCount === 1 ? '' : 's'}`);
-                State.commit();
+                State.commit(['activities']);
                 syncUI();
             }
 
@@ -2962,7 +2984,7 @@
                 });
                 agent.total++;
                 logActivity(agent.name, `was assigned Zendesk ticket #${ticket.id}`);
-                State.commit();
+                State.commit(['tickets', 'agents', 'activities']);
                 syncUI();
 
                 zendeskQueueCache = zendeskQueueCache.filter(t => t.id !== ticket.id);
@@ -3088,7 +3110,7 @@
                 });
                 agent.total++;
                 logActivity(agent.name, `sent an initial response on Zendesk ticket #${ticket.id}`);
-                State.commit();
+                State.commit(['tickets', 'agents', 'activities']);
                 syncUI();
 
                 zendeskQueueCache = zendeskQueueCache.filter(t => t.id !== ticket.id);
