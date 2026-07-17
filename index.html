@@ -782,6 +782,15 @@
                 <select id="assign-zendesk-agent" class="input-control" required></select>
                 <span class="input-hint">Only agents with a Zendesk Agent Email set (Manage Agents) are shown.</span>
             </div>
+            <div class="input-group">
+                <label>CC</label>
+                <div class="checkbox-group" id="assign-cc-group" style="flex-direction: row; flex-wrap: wrap; gap: 0.5rem 1.25rem;">
+                    <label class="perm-check"><input type="checkbox" class="zendesk-cc-checkbox" value="support@dispatchtrack.com"> Support</label>
+                    <label class="perm-check"><input type="checkbox" class="zendesk-cc-checkbox" value="customersuccess@dispatchtrack.com"> Customer Success</label>
+                    <label class="perm-check"><input type="checkbox" class="zendesk-cc-checkbox" value="sales@dispatchtrack.com"> Sales</label>
+                    <label class="perm-check"><input type="checkbox" class="zendesk-cc-checkbox" value="accounting@dispatchtrack.com"> Accounting</label>
+                </div>
+            </div>
             <div style="display: flex; gap: 1rem; margin-top: 1.5rem;">
                 <button type="button" class="btn btn-outline" style="flex: 1;" onclick="window.closeModals()">Cancel</button>
                 <button type="button" class="btn btn-primary" style="flex: 1;" onclick="window.confirmAssignZendeskTicket('assign')">Assign</button>
@@ -805,6 +814,15 @@
                 <textarea id="send-ir-draft" class="input-control" rows="8" placeholder="Select an agent above to generate a draft..."></textarea>
                 <span class="input-hint">This is exactly what will be posted as a public reply to the customer &mdash; edit it before sending.</span>
             </div>
+            <div class="input-group">
+                <label>CC</label>
+                <div class="checkbox-group" id="send-ir-cc-group" style="flex-direction: row; flex-wrap: wrap; gap: 0.5rem 1.25rem;">
+                    <label class="perm-check"><input type="checkbox" class="zendesk-cc-checkbox" value="support@dispatchtrack.com"> Support</label>
+                    <label class="perm-check"><input type="checkbox" class="zendesk-cc-checkbox" value="customersuccess@dispatchtrack.com"> Customer Success</label>
+                    <label class="perm-check"><input type="checkbox" class="zendesk-cc-checkbox" value="sales@dispatchtrack.com"> Sales</label>
+                    <label class="perm-check"><input type="checkbox" class="zendesk-cc-checkbox" value="accounting@dispatchtrack.com"> Accounting</label>
+                </div>
+            </div>
             <div style="display: flex; gap: 1rem; margin-top: 1rem;">
                 <button type="button" class="btn btn-outline" style="flex: 1;" onclick="window.closeModals()">Cancel</button>
                 <button type="button" class="btn btn-outline" id="btn-regenerate-ir" style="flex: 1;" onclick="window.regenerateIrDraft()">Regenerate</button>
@@ -821,6 +839,15 @@
                 <label>Message (sent as-is to every selected ticket)</label>
                 <textarea id="bulk-ir-draft" class="input-control" rows="8" placeholder="Your Initial Response template..."></textarea>
                 <span class="input-hint">Starts from your saved Initial Response template (admin.html) &mdash; edit before sending. These tickets remain unassigned.</span>
+            </div>
+            <div class="input-group">
+                <label>CC</label>
+                <div class="checkbox-group" id="bulk-ir-cc-group" style="flex-direction: row; flex-wrap: wrap; gap: 0.5rem 1.25rem;">
+                    <label class="perm-check"><input type="checkbox" class="zendesk-cc-checkbox" value="support@dispatchtrack.com"> Support</label>
+                    <label class="perm-check"><input type="checkbox" class="zendesk-cc-checkbox" value="customersuccess@dispatchtrack.com"> Customer Success</label>
+                    <label class="perm-check"><input type="checkbox" class="zendesk-cc-checkbox" value="sales@dispatchtrack.com"> Sales</label>
+                    <label class="perm-check"><input type="checkbox" class="zendesk-cc-checkbox" value="accounting@dispatchtrack.com"> Accounting</label>
+                </div>
             </div>
             <div style="display: flex; gap: 1rem; margin-top: 1rem;">
                 <button type="button" class="btn btn-outline" style="flex: 1;" onclick="window.closeModals()">Cancel</button>
@@ -2523,6 +2550,23 @@
             }[ch]));
         }
 
+        // Shared CC checkbox helpers used by the Assign, Send IR, and Bulk Send IR modals.
+        function getSelectedCcs(containerId) {
+            const container = document.getElementById(containerId);
+            if (!container) return [];
+            return Array.from(container.querySelectorAll('.zendesk-cc-checkbox:checked')).map(cb => cb.value);
+        }
+
+        function resetCcCheckboxes(containerId) {
+            const container = document.getElementById(containerId);
+            if (!container) return;
+            container.querySelectorAll('.zendesk-cc-checkbox').forEach(cb => { cb.checked = false; });
+        }
+
+        function buildEmailCcs(emails) {
+            return emails.map(email => ({ user_email: email, action: 'put' }));
+        }
+
         function resolveZendeskActingEmail() {
             const cu = State.currentUser;
             if (cu && cu.zendeskAgentEmail && cu.zendeskAgentEmail.trim()) return cu.zendeskAgentEmail.trim();
@@ -2666,6 +2710,7 @@
             if (count === 0) return;
             UI.bulkIrSubject.innerText = `Sending to ${count} selected ticket${count === 1 ? '' : 's'} — this will NOT assign them, they stay in Unassigned.`;
             UI.bulkIrDraft.value = (State.settings.irTemplate || '').trim();
+            resetCcCheckboxes('bulk-ir-cc-group');
             UI.modalBulkSendIr.classList.add('active');
         };
 
@@ -2678,16 +2723,20 @@
 
             const zd = State.settings.zendesk;
             const actingEmail = resolveZendeskActingEmail();
+            const ccEmails = getSelectedCcs('bulk-ir-cc-group');
+            const emailCcs = ccEmails.length > 0 ? buildEmailCcs(ccEmails) : null;
             let successCount = 0;
             let failCount = 0;
 
             for (const id of ids) {
                 try {
                     const target = `https://${zd.subdomain}.zendesk.com/api/v2/tickets/${id}.json`;
+                    const ticketPayload = { comment: { body: text, public: true } };
+                    if (emailCcs) ticketPayload.email_ccs = emailCcs;
                     const res = await zendeskFetch(target, {
                         method: 'PUT',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ ticket: { comment: { body: text, public: true } } })
+                        body: JSON.stringify({ ticket: ticketPayload })
                     }, actingEmail);
                     if (res.ok) successCount++; else failCount++;
                 } catch (err) {
@@ -2948,6 +2997,7 @@
                 });
             }
 
+            resetCcCheckboxes('assign-cc-group');
             UI.modalAssignZendesk.classList.add('active');
         };
 
@@ -2965,10 +3015,13 @@
                 const zd = State.settings.zendesk;
                 const ticketLink = `https://${zd.subdomain}.zendesk.com/agent/tickets/${ticket.id}`;
                 const target = `https://${zd.subdomain}.zendesk.com/api/v2/tickets/${ticket.id}.json`;
+                const ccEmails = getSelectedCcs('assign-cc-group');
+                const ticketPayload = { assignee_email: agent.zendeskEmail };
+                if (ccEmails.length > 0) ticketPayload.email_ccs = buildEmailCcs(ccEmails);
                 const res = await zendeskFetch(target, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ ticket: { assignee_email: agent.zendeskEmail } })
+                    body: JSON.stringify({ ticket: ticketPayload })
                 }, resolveZendeskActingEmail());
                 if (!res.ok) throw new Error(`Zendesk returned ${res.status}`);
 
@@ -3021,6 +3074,7 @@
             }
             UI.sendIrAgentSelect.onchange = generateIrDraft;
 
+            resetCcCheckboxes('send-ir-cc-group');
             UI.modalSendIr.classList.add('active');
         };
 
@@ -3090,10 +3144,13 @@
             try {
                 const zd = State.settings.zendesk;
                 const target = `https://${zd.subdomain}.zendesk.com/api/v2/tickets/${ticket.id}.json`;
+                const ccEmails = getSelectedCcs('send-ir-cc-group');
+                const ticketPayload = { assignee_email: agent.zendeskEmail, comment: { body: replyText, public: true } };
+                if (ccEmails.length > 0) ticketPayload.email_ccs = buildEmailCcs(ccEmails);
                 const res = await zendeskFetch(target, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ ticket: { assignee_email: agent.zendeskEmail, comment: { body: replyText, public: true } } })
+                    body: JSON.stringify({ ticket: ticketPayload })
                 }, resolveZendeskActingEmail());
                 if (!res.ok) throw new Error(`Zendesk returned ${res.status}`);
 
