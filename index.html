@@ -217,10 +217,10 @@
                                 </select>
                             </div>
                             <div class="panel-body" style="padding-top: 0.5rem;">
-                                <div id="chart-custom-range" class="hidden" style="display:flex; gap:0.5rem; margin-bottom: 1rem; align-items:center;">
-                                    <input type="date" id="chart-start" class="input-control" style="padding: 0.3rem;"> 
-                                    <span style="color:var(--text-muted);">to</span> 
-                                    <input type="date" id="chart-end" class="input-control" style="padding: 0.3rem;">
+                                <div id="chart-custom-range" class="hidden" style="display:flex; gap:0.5rem; margin-bottom: 1rem; align-items:center; flex-wrap: wrap;">
+                                    <input type="datetime-local" id="chart-start" class="input-control" style="padding: 0.3rem; width: auto;">
+                                    <span style="color:var(--text-muted);">to</span>
+                                    <input type="datetime-local" id="chart-end" class="input-control" style="padding: 0.3rem; width: auto;">
                                 </div>
 
                                 <div class="chart-wrapper-overflow">
@@ -274,6 +274,7 @@
                                     <tr>
                                         <th>Assignee</th>
                                         <th>Ticket Reference</th>
+                                        <th>Source</th>
                                         <th>Date</th>
                                         <th>Timestamp</th>
                                         <th class="perm-manage-tickets" style="text-align: right;">Actions</th>
@@ -806,9 +807,20 @@
             <p style="color: var(--text-muted); margin-bottom: 1.5rem; font-size: 0.9rem;" id="assign-zendesk-subject"></p>
             <input type="hidden" id="assign-zendesk-id">
             <div class="input-group">
-                <label>Assign To Agent</label>
-                <select id="assign-zendesk-agent" class="input-control" required></select>
-                <span class="input-hint">Only agents with a Zendesk Agent Email set (Manage Agents) are shown.</span>
+                <label>Assign To</label>
+                <div class="glow-box" id="assign-zendesk-next-box" style="padding: 1rem 1.25rem; margin-bottom: 0.75rem;">
+                    <div class="agent-profile">
+                        <img id="assign-zendesk-next-avatar" class="agent-avatar" style="width: 38px; height: 38px;" src="" alt="">
+                        <div class="agent-info">
+                            <div class="label">Up Next In Queue</div>
+                            <div class="name" style="font-size: 1.05rem;" id="assign-zendesk-next-name">Loading&hellip;</div>
+                        </div>
+                    </div>
+                </div>
+                <input type="hidden" id="assign-zendesk-next-id">
+                <select id="assign-zendesk-agent" class="input-control hidden" style="margin-bottom: 0.75rem;"></select>
+                <button type="button" class="btn btn-outline" id="btn-assign-zendesk-other-agents" style="width: 100%;" onclick="window.toggleAssignOtherAgents()">Other Agents</button>
+                <span class="input-hint">Only agents with a Zendesk Agent Email set (Manage Agents) are eligible.</span>
             </div>
             <div class="input-group">
                 <label>CC</label>
@@ -833,9 +845,20 @@
             <p style="color: var(--text-muted); margin-bottom: 1.5rem; font-size: 0.9rem;" id="send-ir-subject"></p>
             <input type="hidden" id="send-ir-id">
             <div class="input-group">
-                <label>Assign To Agent</label>
-                <select id="send-ir-agent" class="input-control" required></select>
-                <span class="input-hint">Only agents with a Zendesk Agent Email set (Manage Agents) are shown. Drafting starts once you pick one.</span>
+                <label>Assign To</label>
+                <div class="glow-box" id="send-ir-next-box" style="padding: 1rem 1.25rem; margin-bottom: 0.75rem;">
+                    <div class="agent-profile">
+                        <img id="send-ir-next-avatar" class="agent-avatar" style="width: 38px; height: 38px;" src="" alt="">
+                        <div class="agent-info">
+                            <div class="label">Up Next In Queue</div>
+                            <div class="name" style="font-size: 1.05rem;" id="send-ir-next-name">Loading&hellip;</div>
+                        </div>
+                    </div>
+                </div>
+                <input type="hidden" id="send-ir-next-id">
+                <select id="send-ir-agent" class="input-control hidden" style="margin-bottom: 0.75rem;"></select>
+                <button type="button" class="btn btn-outline" id="btn-send-ir-other-agents" style="width: 100%;" onclick="window.toggleSendIrOtherAgents()">Other Agents</button>
+                <span class="input-hint">Only agents with a Zendesk Agent Email set (Manage Agents) are eligible. Drafting starts automatically.</span>
             </div>
             <div class="input-group">
                 <label>Draft Response <span id="send-ir-status" style="text-transform: none; font-weight: 500; color: var(--text-muted);"></span></label>
@@ -1354,8 +1377,8 @@
                     UI.chartCustomRangeBox.classList.remove('hidden');
                 } else {
                     UI.chartCustomRangeBox.classList.add('hidden');
-                    updateChart();
                 }
+                updateChart();
             });
             UI.chartStart.addEventListener('change', updateChart);
             UI.chartEnd.addEventListener('change', updateChart);
@@ -2065,13 +2088,25 @@
         function getNextAvailableAgentIndex(startIndex) {
             const total = State.agents.length;
             if (total === 0) return -1;
-            
+
             for (let i = 0; i < total; i++) {
                 const idx = (startIndex + i) % total;
                 const ag = State.agents[idx];
                 if (ag.isAvailable && ag.role === 'support') return idx;
             }
             return -1;
+        }
+
+        // Same shared round-robin position as the Dashboard's queue, but also requires a
+        // Zendesk Agent Email since that's what's actually needed to assign in Zendesk.
+        function getNextZendeskQueueAgent() {
+            const total = State.agents.length;
+            for (let i = 0; i < total; i++) {
+                const idx = (State.queueIdx + i) % total;
+                const ag = State.agents[idx];
+                if (ag.isAvailable && ag.role === 'support' && ag.zendeskEmail && ag.zendeskEmail.trim()) return ag;
+            }
+            return null;
         }
 
         // Opens the agent's Slack profile in a new tab. (We have a Slack Bot Token flow
@@ -2495,7 +2530,7 @@
             UI.tableHistory.innerHTML = '';
             UI.statFiltered.innerText = results.length;
 
-            if (results.length === 0) return UI.tableHistory.innerHTML = `<tr><td colspan="5" style="text-align:center; color: var(--text-muted); padding: 2rem;">No logs match criteria.</td></tr>`;
+            if (results.length === 0) return UI.tableHistory.innerHTML = `<tr><td colspan="6" style="text-align:center; color: var(--text-muted); padding: 2rem;">No logs match criteria.</td></tr>`;
 
             const user = State.currentUser;
             const canManageTickets = user && (user.role === 'admin' || (user.permissions && user.permissions.manageTickets));
@@ -2510,10 +2545,15 @@
                     </td>`;
                 }
 
+                const sourceBadge = t.source === 'zendesk'
+                    ? `<span class="priority-badge priority-normal">Zendesk Queue</span>`
+                    : `<span class="priority-badge priority-low">Manual Link</span>`;
+
                 UI.tableHistory.insertAdjacentHTML('beforeend', `
                     <tr>
                         <td style="font-weight: 600;">${t.agentName}</td>
                         <td class="link-cell"><a href="${t.link}" target="_blank">${t.link}</a></td>
+                        <td>${sourceBadge}</td>
                         <td>${t.date}</td>
                         <td style="color: var(--text-muted);">${t.time}</td>
                         ${actionHtml}
@@ -2532,49 +2572,104 @@
                 type: 'bar',
                 data: { labels: [], datasets: [{ data: [], backgroundColor: getBarColor(), borderRadius: 4, barThickness: 45 }] },
                 plugins: [barLabelsPlugin],
-                options: { layout: { padding: { top: 25 } }, responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { enabled: false } }, scales: { y: { display: false, beginAtZero: true }, x: { grid: { display: false }, border: { display: false }, ticks: { color: '#94a3b8', font: { weight: 500 } } } }, animation: { duration: 400 } }
+                options: {
+                    layout: { padding: { top: 25 } }, responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: { display: false }, tooltip: { enabled: false } },
+                    scales: { y: { display: false, beginAtZero: true }, x: { grid: { display: false }, border: { display: false }, ticks: { color: '#94a3b8', font: { weight: 500 } } } },
+                    animation: { duration: 400 },
+                    onHover: (evt, elements) => { evt.native.target.style.cursor = elements.length ? 'pointer' : 'default'; },
+                    onClick: (evt, elements) => {
+                        if (!elements.length) return;
+                        const agentName = loadChartInstance.data.labels[elements[0].index];
+                        drillIntoAgentHistory(agentName);
+                    }
+                }
             });
+        }
+
+        // Formats a Date as the value a <input type="datetime-local"> expects (local time, no seconds).
+        function toDatetimeLocalValue(d) {
+            const pad = n => String(n).padStart(2, '0');
+            return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+        }
+
+        // Tickets only store date ("YYYY-MM-DD") and a 12-hour time string ("06:05 am") --
+        // reconstruct a real Date so the chart's range can compare by actual timestamp.
+        function parseTicketTimestamp(t) {
+            const d = new Date(`${t.date}T00:00:00`);
+            const match = /(\d{1,2}):(\d{2})\s*(am|pm)/i.exec(t.time || '');
+            if (match) {
+                let hours = parseInt(match[1], 10) % 12;
+                const minutes = parseInt(match[2], 10);
+                if (/pm/i.test(match[3])) hours += 12;
+                d.setHours(hours, minutes, 0, 0);
+            }
+            return d;
         }
 
         function getChartDateRange() {
             const selection = UI.chartRangeSelect.value;
-            const today = new Date();
-            let start = new Date();
-            let end = new Date();
+            const now = new Date();
 
-            if (selection === 'today') {
-                // Keep as today
-            } else if (selection === '7days') {
-                start.setDate(today.getDate() - 7);
-            } else if (selection === '30days') {
-                start.setDate(today.getDate() - 30);
-            } else if (selection === 'custom') {
-                if (UI.chartStart.value) start = new Date(UI.chartStart.value);
-                if (UI.chartEnd.value) end = new Date(UI.chartEnd.value);
+            if (selection === 'custom') {
+                if (!UI.chartStart.value || !UI.chartEnd.value) {
+                    const todayStart = new Date(now);
+                    todayStart.setHours(0, 0, 0, 0);
+                    if (!UI.chartStart.value) UI.chartStart.value = toDatetimeLocalValue(todayStart);
+                    if (!UI.chartEnd.value) UI.chartEnd.value = toDatetimeLocalValue(now);
+                }
+                const start = new Date(UI.chartStart.value);
+                const end = new Date(UI.chartEnd.value);
+                return { start, end };
             }
 
-            return { start: start.toISOString().split('T')[0], end: end.toISOString().split('T')[0] };
+            const end = new Date(now);
+            end.setHours(23, 59, 59, 999);
+            const start = new Date(now);
+            start.setHours(0, 0, 0, 0);
+            if (selection === '7days') start.setDate(start.getDate() - 7);
+            else if (selection === '30days') start.setDate(start.getDate() - 30);
+            return { start, end };
         }
 
         function updateChart() {
             if(!loadChartInstance) return;
-            
+
             const range = getChartDateRange();
             const rangeCounts = {};
-            
-            State.tickets.forEach(t => { 
-                if (t.date >= range.start && t.date <= range.end) {
-                    rangeCounts[t.agentName] = (rangeCounts[t.agentName] || 0) + 1; 
+
+            State.tickets.forEach(t => {
+                const ts = parseTicketTimestamp(t);
+                if (ts >= range.start && ts <= range.end) {
+                    rangeCounts[t.agentName] = (rangeCounts[t.agentName] || 0) + 1;
                 }
             });
 
-            const displayAgents = State.agents.filter(a => a.isAvailable || rangeCounts[a.name] > 0); 
+            const displayAgents = State.agents.filter(a => a.isAvailable || rangeCounts[a.name] > 0);
             const chartWrapper = document.getElementById('chart-width-controller');
             chartWrapper.style.minWidth = Math.max(100, displayAgents.length * 80) + 'px';
 
             loadChartInstance.data.labels = displayAgents.map(a => a.name);
             loadChartInstance.data.datasets[0].data = displayAgents.map(a => rangeCounts[a.name] || 0);
             loadChartInstance.update();
+        }
+
+        function drillIntoAgentHistory(agentName) {
+            const agent = State.agents.find(a => a.name === agentName);
+            if (!agent) return;
+
+            const range = getChartDateRange();
+            const pad = n => String(n).padStart(2, '0');
+            const toDateStr = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+
+            UI.filterAgent.value = agent.id;
+            UI.filterDateStart.value = toDateStr(range.start);
+            UI.filterDateEnd.value = toDateStr(range.end);
+
+            const historyNav = document.querySelector('.nav-item[data-target="view-history"]');
+            if (historyNav) switchView(historyNav);
+            renderHistoryTable();
+            notify(`Showing ${agent.name}'s tickets for the selected range`);
         }
 
         function updateChartTheme() {
@@ -2605,6 +2700,73 @@
 
         function buildEmailCcs(emails) {
             return emails.map(email => ({ user_email: email, action: 'put' }));
+        }
+
+        // Shared "Up Next In Queue" + Other Agents helpers for the Assign and Send IR
+        // modals. `prefix` is 'assign-zendesk' or 'send-ir', matching each modal's DOM ids.
+        function populateOtherAgentsSelect(selectEl, eligibleAgents) {
+            selectEl.innerHTML = '';
+            if (eligibleAgents.length === 0) {
+                selectEl.innerHTML = '<option value="">-- No agents have a Zendesk email set --</option>';
+            } else {
+                eligibleAgents.forEach(a => {
+                    selectEl.insertAdjacentHTML('beforeend', `<option value="${a.id}">${escapeHtml(a.name)} (${escapeHtml(a.role)})</option>`);
+                });
+            }
+        }
+
+        function renderNextAgentBox(prefix, agent) {
+            const nameEl = document.getElementById(`${prefix}-next-name`);
+            const avatarEl = document.getElementById(`${prefix}-next-avatar`);
+            const idEl = document.getElementById(`${prefix}-next-id`);
+            if (agent) {
+                nameEl.innerText = `${agent.name} (${agent.role})`;
+                avatarEl.src = getAgentAvatarUrl(agent);
+                idEl.value = agent.id;
+            } else {
+                nameEl.innerText = 'No eligible agent in queue right now';
+                avatarEl.src = 'https://ui-avatars.com/api/?name=QA&background=272838&color=fff';
+                idEl.value = '';
+            }
+        }
+
+        function toggleOtherAgents(prefix) {
+            const sel = document.getElementById(`${prefix}-agent`);
+            const box = document.getElementById(`${prefix}-next-box`);
+            const btn = document.getElementById(`btn-${prefix}-other-agents`);
+            const showingOther = sel.classList.contains('hidden');
+            sel.classList.toggle('hidden', !showingOther);
+            box.classList.toggle('hidden', showingOther);
+            btn.innerText = showingOther ? 'Use Queue Default' : 'Other Agents';
+            return showingOther;
+        }
+
+        window.toggleAssignOtherAgents = function() {
+            toggleOtherAgents('assign-zendesk');
+        };
+
+        window.toggleSendIrOtherAgents = function() {
+            const nowShowingOther = toggleOtherAgents('send-ir');
+            if (nowShowingOther) {
+                // Just revealed the dropdown -- the browser auto-selects its first option,
+                // but that's not a real choice yet, so don't draft until the user actually
+                // picks someone via the select's onchange.
+                UI.sendIrDraft.value = '';
+                UI.sendIrStatus.innerText = '';
+            } else {
+                // Back to the known up-next agent -- safe to draft immediately.
+                generateIrDraft();
+            }
+        };
+
+        function isUsingOtherAgents(prefix) {
+            return !document.getElementById(`${prefix}-agent`).classList.contains('hidden');
+        }
+
+        function getEffectiveZendeskAgentId(prefix) {
+            return isUsingOtherAgents(prefix)
+                ? document.getElementById(`${prefix}-agent`).value
+                : document.getElementById(`${prefix}-next-id`).value;
         }
 
         function resolveZendeskActingEmail() {
@@ -3028,14 +3190,12 @@
             UI.assignZendeskSubject.innerText = `#${ticket.id} — ${ticket.subject || '(no subject)'}`;
 
             const eligibleAgents = State.agents.filter(a => a.zendeskEmail && a.zendeskEmail.trim() !== '');
-            UI.assignZendeskAgentSelect.innerHTML = '';
-            if (eligibleAgents.length === 0) {
-                UI.assignZendeskAgentSelect.innerHTML = '<option value="">-- No agents have a Zendesk email set --</option>';
-            } else {
-                eligibleAgents.forEach(a => {
-                    UI.assignZendeskAgentSelect.insertAdjacentHTML('beforeend', `<option value="${a.id}">${escapeHtml(a.name)} (${escapeHtml(a.role)})</option>`);
-                });
-            }
+            populateOtherAgentsSelect(UI.assignZendeskAgentSelect, eligibleAgents);
+            renderNextAgentBox('assign-zendesk', getNextZendeskQueueAgent());
+
+            UI.assignZendeskAgentSelect.classList.add('hidden');
+            document.getElementById('assign-zendesk-next-box').classList.remove('hidden');
+            document.getElementById('btn-assign-zendesk-other-agents').innerText = 'Other Agents';
 
             resetCcCheckboxes('assign-cc-group');
             UI.modalAssignZendesk.classList.add('active');
@@ -3043,7 +3203,8 @@
 
         window.confirmAssignZendeskTicket = async function(action) {
             const ticketId = Number(UI.assignZendeskId.value);
-            const agentId = UI.assignZendeskAgentSelect.value;
+            const usingOther = isUsingOtherAgents('assign-zendesk');
+            const agentId = getEffectiveZendeskAgentId('assign-zendesk');
             const ticket = zendeskQueueCache.find(t => t.id === ticketId);
             const agent = State.agents.find(a => a.id === agentId);
 
@@ -3077,7 +3238,13 @@
                 });
                 agent.total++;
                 logActivity(agent.name, `was assigned Zendesk ticket #${ticket.id}`);
-                State.commit(['tickets', 'agents', 'activities']);
+
+                if (!usingOther) {
+                    const idx = State.agents.indexOf(agent);
+                    State.queueIdx = getNextAvailableAgentIndex(idx + 1);
+                }
+
+                State.commit(['tickets', 'agents', 'activities', 'queueIdx']);
                 syncUI();
 
                 zendeskQueueCache = zendeskQueueCache.filter(t => t.id !== ticket.id);
@@ -3103,23 +3270,22 @@
             UI.sendIrStatus.innerText = '';
 
             const eligibleAgents = State.agents.filter(a => a.zendeskEmail && a.zendeskEmail.trim() !== '');
-            UI.sendIrAgentSelect.innerHTML = '';
-            if (eligibleAgents.length === 0) {
-                UI.sendIrAgentSelect.innerHTML = '<option value="">-- No agents have a Zendesk email set --</option>';
-            } else {
-                UI.sendIrAgentSelect.insertAdjacentHTML('beforeend', '<option value="">-- Select an agent --</option>');
-                eligibleAgents.forEach(a => {
-                    UI.sendIrAgentSelect.insertAdjacentHTML('beforeend', `<option value="${a.id}">${escapeHtml(a.name)} (${escapeHtml(a.role)})</option>`);
-                });
-            }
+            populateOtherAgentsSelect(UI.sendIrAgentSelect, eligibleAgents);
+            renderNextAgentBox('send-ir', getNextZendeskQueueAgent());
             UI.sendIrAgentSelect.onchange = generateIrDraft;
+
+            UI.sendIrAgentSelect.classList.add('hidden');
+            document.getElementById('send-ir-next-box').classList.remove('hidden');
+            document.getElementById('btn-send-ir-other-agents').innerText = 'Other Agents';
 
             resetCcCheckboxes('send-ir-cc-group');
             UI.modalSendIr.classList.add('active');
+
+            generateIrDraft();
         };
 
         async function generateIrDraft() {
-            const agentId = UI.sendIrAgentSelect.value;
+            const agentId = getEffectiveZendeskAgentId('send-ir');
             const ticketId = Number(UI.sendIrId.value);
             const ticket = zendeskQueueCache.find(t => t.id === ticketId);
             const agent = State.agents.find(a => a.id === agentId);
@@ -3163,13 +3329,14 @@
         }
 
         window.regenerateIrDraft = function() {
-            if (!UI.sendIrAgentSelect.value) return notify("Select an agent first.");
+            if (!getEffectiveZendeskAgentId('send-ir')) return notify("Select an agent first.");
             generateIrDraft();
         };
 
         window.confirmSendIr = async function() {
             const ticketId = Number(UI.sendIrId.value);
-            const agentId = UI.sendIrAgentSelect.value;
+            const usingOther = isUsingOtherAgents('send-ir');
+            const agentId = getEffectiveZendeskAgentId('send-ir');
             const ticket = zendeskQueueCache.find(t => t.id === ticketId);
             const agent = State.agents.find(a => a.id === agentId);
             const replyText = UI.sendIrDraft.value.trim();
@@ -3207,7 +3374,13 @@
                 });
                 agent.total++;
                 logActivity(agent.name, `sent an initial response on Zendesk ticket #${ticket.id}`);
-                State.commit(['tickets', 'agents', 'activities']);
+
+                if (!usingOther) {
+                    const idx = State.agents.indexOf(agent);
+                    State.queueIdx = getNextAvailableAgentIndex(idx + 1);
+                }
+
+                State.commit(['tickets', 'agents', 'activities', 'queueIdx']);
                 syncUI();
 
                 zendeskQueueCache = zendeskQueueCache.filter(t => t.id !== ticket.id);
