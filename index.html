@@ -999,6 +999,15 @@
             return new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }).toLowerCase();
         }
 
+        // Local calendar date as "YYYY-MM-DD". Deliberately NOT toISOString().split('T')[0] --
+        // that reads the UTC date, which rolls over ~5:30 before local midnight in IST and mismatches
+        // the local getFormattedTime() stamped alongside it, corrupting parseTicketTimestamp's result
+        // for any ticket created between midnight and sunrise.
+        function getLocalDateString(d = new Date()) {
+            const pad = n => String(n).padStart(2, '0');
+            return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+        }
+
         function getAgentAvatarUrl(agent) {
             if (agent.profilePic && agent.profilePic.trim() !== '') return agent.profilePic;
             return `https://ui-avatars.com/api/?name=${encodeURIComponent(agent.name)}&background=1e1e2d&color=94a3b8&size=64`;
@@ -1132,6 +1141,9 @@
         });
 
         let loadChartInstance = null;
+        // Set only by chart drill-down, to make the History Log's date-only filter match the
+        // chart's precise timestamp window exactly. Cleared whenever the user edits filters manually.
+        let historyDrillRange = null;
         let zendeskQueueCache = [];
         let zendeskRequesterMap = {};
         let zendeskSuspendedCache = [];
@@ -1414,7 +1426,7 @@
         function bootApp() {
             document.documentElement.setAttribute('data-theme', localStorage.getItem('ent_v10_theme') || 'dark');
             
-            const today = new Date().toISOString().split('T')[0];
+            const today = getLocalDateString();
             document.getElementById('date-badge-1').innerText = today;
 
             // History's filters are date-only, so "today" (the 9pm-6am shift window)
@@ -1450,9 +1462,9 @@
             UI.formCsmAssign.addEventListener('submit', processCsmAssignment);
             UI.btnSkip.addEventListener('click', processSkipQueue);
             
-            UI.filterAgent.addEventListener('change', renderHistoryTable);
-            UI.filterDateStart.addEventListener('change', renderHistoryTable);
-            UI.filterDateEnd.addEventListener('change', renderHistoryTable);
+            UI.filterAgent.addEventListener('change', () => { historyDrillRange = null; renderHistoryTable(); });
+            UI.filterDateStart.addEventListener('change', () => { historyDrillRange = null; renderHistoryTable(); });
+            UI.filterDateEnd.addEventListener('change', () => { historyDrillRange = null; renderHistoryTable(); });
 
             // Chart Range Listeners
             UI.chartRangeSelect.addEventListener('change', () => {
@@ -1858,7 +1870,13 @@
                 const matchAgent = fAgent ? t.agentId === fAgent : true;
                 const matchStart = fStart ? t.date >= fStart : true;
                 const matchEnd = fEnd ? t.date <= fEnd : true;
-                return matchAgent && matchStart && matchEnd;
+                if (!matchAgent || !matchStart || !matchEnd) return false;
+
+                if (historyDrillRange) {
+                    const ts = parseTicketTimestamp(t);
+                    if (ts < historyDrillRange.start || ts > historyDrillRange.end) return false;
+                }
+                return true;
             });
         }
 
@@ -1879,7 +1897,7 @@
             const encodedUri = encodeURI(csvContent);
             const link = document.createElement("a");
             link.setAttribute("href", encodedUri);
-            link.setAttribute("download", `Assignment_Tracker_Export_${new Date().toISOString().split('T')[0]}.csv`);
+            link.setAttribute("download", `Assignment_Tracker_Export_${getLocalDateString()}.csv`);
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
@@ -1918,7 +1936,7 @@
                 headStyles: { fillColor: [79, 70, 229] } 
             });
 
-            doc.save(`Assignment_Tracker_Report_${new Date().toISOString().split('T')[0]}.pdf`);
+            doc.save(`Assignment_Tracker_Report_${getLocalDateString()}.pdf`);
             notify("PDF Exported Successfully");
         }
 
@@ -2011,7 +2029,7 @@
 
             const link = document.createElement("a");
             link.setAttribute("href", encodeURI(csvContent));
-            link.setAttribute("download", `Shift_Timings_${new Date().toISOString().split('T')[0]}.csv`);
+            link.setAttribute("download", `Shift_Timings_${getLocalDateString()}.csv`);
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
@@ -2042,7 +2060,7 @@
                 headStyles: { fillColor: [79, 70, 229] } 
             });
 
-            doc.save(`Shift_Timings_${new Date().toISOString().split('T')[0]}.pdf`);
+            doc.save(`Shift_Timings_${getLocalDateString()}.pdf`);
             notify("Shifts PDF Exported");
         }
 
@@ -2251,7 +2269,7 @@
                 agentId: currAgent.id,
                 agentName: currAgent.name,
                 link: link,
-                date: new Date().toISOString().split('T')[0], 
+                date: getLocalDateString(), 
                 time: getFormattedTime()
             });
 
@@ -2292,7 +2310,7 @@
                 agentId: currAgent.id,
                 agentName: currAgent.name,
                 link: link,
-                date: new Date().toISOString().split('T')[0], 
+                date: getLocalDateString(), 
                 time: getFormattedTime()
             });
 
@@ -2326,7 +2344,7 @@
                 agentId: currAgent.id,
                 agentName: currAgent.name,
                 link: link,
-                date: new Date().toISOString().split('T')[0], 
+                date: getLocalDateString(), 
                 time: getFormattedTime()
             });
 
@@ -2790,6 +2808,7 @@
             UI.filterAgent.value = agent.id;
             UI.filterDateStart.value = toDateStr(range.start);
             UI.filterDateEnd.value = toDateStr(range.end);
+            historyDrillRange = { start: range.start, end: range.end };
 
             const historyNav = document.querySelector('.nav-item[data-target="view-history"]');
             if (historyNav) switchView(historyNav);
@@ -3356,7 +3375,7 @@
                     agentId: agent.id,
                     agentName: agent.name,
                     link: ticketLink,
-                    date: new Date().toISOString().split('T')[0],
+                    date: getLocalDateString(),
                     time: getFormattedTime(),
                     zendeskId: ticket.id,
                     source: 'zendesk'
@@ -3491,7 +3510,7 @@
                     agentId: agent.id,
                     agentName: agent.name,
                     link: `https://${zd.subdomain}.zendesk.com/agent/tickets/${ticket.id}`,
-                    date: new Date().toISOString().split('T')[0],
+                    date: getLocalDateString(),
                     time: getFormattedTime(),
                     zendeskId: ticket.id,
                     source: 'zendesk',
