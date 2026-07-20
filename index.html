@@ -66,6 +66,10 @@
                     <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
                     Zendesk Queue
                 </button>
+                <button class="nav-item perm-view-csat" data-target="view-csat">
+                    <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg>
+                    CSAT
+                </button>
                 <button class="nav-item admin-only" data-target="view-users">
                     <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
                     User Accounts
@@ -544,6 +548,64 @@
                     </div>
                 </section>
 
+                <section id="view-csat" class="view-section perm-view-csat">
+                    <div class="view-header-flex" style="margin-bottom: 1.5rem;">
+                        <div class="page-title">
+                            <h1>CSAT</h1>
+                            <p>Customer satisfaction ratings from Zendesk, broken down per agent.</p>
+                        </div>
+                        <div class="stat-cards">
+                            <div class="stat-card green" style="min-width:auto;">
+                                <span class="stat-label">Total Good</span>
+                                <span class="stat-value" id="stat-csat-good">0</span>
+                            </div>
+                            <div class="stat-card pink" style="min-width:auto;">
+                                <span class="stat-label">Total Bad</span>
+                                <span class="stat-value" id="stat-csat-bad">0</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="panel">
+                        <div class="panel-header">
+                            <h2>Ratings by Agent</h2>
+                            <div style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
+                                <select id="csat-range-select" class="input-control" style="width: auto; padding: 0.3rem 0.75rem; font-size: 0.8rem;">
+                                    <option value="month">This Month</option>
+                                    <option value="custom">Custom Range</option>
+                                </select>
+                                <span id="csat-status" style="font-size: 0.8rem; color: var(--text-muted);"></span>
+                                <button class="btn btn-outline" id="btn-refresh-csat" style="padding: 0.4rem 1rem; font-size: 0.8rem;">Refresh</button>
+                            </div>
+                        </div>
+                        <div class="panel-body" style="padding-top: 0.5rem;">
+                            <div id="csat-custom-range" class="hidden" style="display:flex; gap:0.5rem; margin-bottom: 1rem; align-items:center; flex-wrap: wrap;">
+                                <input type="datetime-local" id="csat-start" class="input-control" style="padding: 0.3rem; width: auto;">
+                                <span style="color:var(--text-muted);">to</span>
+                                <input type="datetime-local" id="csat-end" class="input-control" style="padding: 0.3rem; width: auto;">
+                            </div>
+                            <div style="max-height: 600px; overflow-y: auto;">
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th style="width: 2rem;"></th>
+                                            <th>Agent</th>
+                                            <th>Good (w/ comment)</th>
+                                            <th>Good (no comment)</th>
+                                            <th>Bad (w/ comment)</th>
+                                            <th>Bad (no comment)</th>
+                                            <th>Total</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="table-csat">
+                                        <tr><td colspan="7" style="text-align:center; color: var(--text-muted); padding: 2rem;">Configure Zendesk in <a href="admin.html">admin.html</a>, then click Refresh.</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
                 <section id="view-users" class="view-section admin-only">
                     <div class="view-header-flex" style="margin-bottom: 1.5rem;">
                         <div class="page-title">
@@ -576,6 +638,7 @@
                                             <label class="perm-check"><input type="checkbox" id="user-perm-agents"> Can Manage Agents</label>
                                             <label class="perm-check"><input type="checkbox" id="user-perm-shifts"> Can Manage Shift Timings</label>
                                             <label class="perm-check"><input type="checkbox" id="user-perm-tickets"> Can Edit/Delete Tickets</label>
+                                            <label class="perm-check"><input type="checkbox" id="user-perm-csat"> Can View CSAT</label>
                                         </div>
                                     </div>
                                     <button type="submit" class="btn btn-primary" style="width: 100%;">Create Account</button>
@@ -726,6 +789,7 @@
                         <label class="perm-check"><input type="checkbox" id="edit-perm-agents"> Can Manage Agents</label>
                         <label class="perm-check"><input type="checkbox" id="edit-perm-shifts"> Can Manage Shift Timings</label>
                         <label class="perm-check"><input type="checkbox" id="edit-perm-tickets"> Can Edit/Delete Tickets</label>
+                        <label class="perm-check"><input type="checkbox" id="edit-perm-csat"> Can View CSAT</label>
                     </div>
                 </div>
                 <div style="display: flex; gap: 1rem; margin-top: 2rem;">
@@ -1092,6 +1156,7 @@
             manageAgentsElements: document.querySelectorAll('.perm-manage-agents'),
             manageShiftsElements: document.querySelectorAll('.perm-manage-shifts'),
             manageTicketsElements: document.querySelectorAll('.perm-manage-tickets'),
+            viewCsatElements: document.querySelectorAll('.perm-view-csat'),
 
             statAgentsSupport: document.getElementById('stat-support'),
             statAgentsCse: document.getElementById('stat-cse'),
@@ -1164,6 +1229,7 @@
             inputPermAgents: document.getElementById('user-perm-agents'),
             inputPermShifts: document.getElementById('user-perm-shifts'),
             inputPermTickets: document.getElementById('user-perm-tickets'),
+            inputPermCsat: document.getElementById('user-perm-csat'),
             tableUsers: document.getElementById('table-users'),
 
             // Zendesk Queue
@@ -1182,6 +1248,17 @@
             zendeskSelectAll: document.getElementById('zendesk-select-all'),
             zendeskSelectedCount: document.getElementById('zendesk-selected-count'),
             btnBulkSendIr: document.getElementById('btn-bulk-send-ir'),
+
+            // CSAT
+            statCsatGood: document.getElementById('stat-csat-good'),
+            statCsatBad: document.getElementById('stat-csat-bad'),
+            csatRangeSelect: document.getElementById('csat-range-select'),
+            csatCustomRangeBox: document.getElementById('csat-custom-range'),
+            csatStart: document.getElementById('csat-start'),
+            csatEnd: document.getElementById('csat-end'),
+            csatStatus: document.getElementById('csat-status'),
+            btnRefreshCsat: document.getElementById('btn-refresh-csat'),
+            tableCsat: document.getElementById('table-csat'),
 
             // Modals
             modalEditTicket: document.getElementById('modal-edit-ticket'),
@@ -1216,6 +1293,7 @@
             editPermAgents: document.getElementById('edit-perm-agents'),
             editPermShifts: document.getElementById('edit-perm-shifts'),
             editPermTickets: document.getElementById('edit-perm-tickets'),
+            editPermCsat: document.getElementById('edit-perm-csat'),
 
             modalResetPass: document.getElementById('modal-reset-pass'),
             formResetPass: document.getElementById('form-reset-pass'),
@@ -1338,9 +1416,14 @@
             
             const today = new Date().toISOString().split('T')[0];
             document.getElementById('date-badge-1').innerText = today;
-            
-            UI.filterDateStart.value = today;
-            UI.filterDateEnd.value = today;
+
+            // History's filters are date-only, so "today" (the 9pm-6am shift window)
+            // defaults to spanning both calendar dates the shift touches.
+            const todayWindow = getTodayShiftWindow();
+            const padDate = n => String(n).padStart(2, '0');
+            const toDateStr = d => `${d.getFullYear()}-${padDate(d.getMonth() + 1)}-${padDate(d.getDate())}`;
+            UI.filterDateStart.value = toDateStr(todayWindow.start);
+            UI.filterDateEnd.value = toDateStr(todayWindow.end);
 
             setupListeners();
             initChart();
@@ -1400,6 +1483,19 @@
             UI.btnRefreshZendesk.addEventListener('click', fetchUnassignedZendeskTickets);
             UI.btnRefreshSuspended.addEventListener('click', fetchSuspendedZendeskTickets);
             UI.btnBulkSendIr.addEventListener('click', window.openBulkSendIrModal);
+
+            // CSAT Range Listeners
+            UI.csatRangeSelect.addEventListener('change', () => {
+                if (UI.csatRangeSelect.value === 'custom') {
+                    UI.csatCustomRangeBox.classList.remove('hidden');
+                } else {
+                    UI.csatCustomRangeBox.classList.add('hidden');
+                }
+                fetchCsatData();
+            });
+            UI.csatStart.addEventListener('change', fetchCsatData);
+            UI.csatEnd.addEventListener('change', fetchCsatData);
+            UI.btnRefreshCsat.addEventListener('click', fetchCsatData);
 
             UI.zendeskSelectAll.addEventListener('change', () => {
                 if (UI.zendeskSelectAll.checked) {
@@ -1484,11 +1580,13 @@
             const canManageAgents = isAdmin || (user.permissions && user.permissions.manageAgents);
             const canManageShifts = isAdmin || (user.permissions && user.permissions.manageShifts);
             const canManageTickets = isAdmin || (user.permissions && user.permissions.manageTickets);
-            
+            const canViewCsat = isAdmin || (user.permissions && user.permissions.viewCsat);
+
             UI.adminElements.forEach(el => el.classList.toggle('hidden', !isAdmin));
             UI.manageAgentsElements.forEach(el => el.classList.toggle('hidden', !canManageAgents));
             UI.manageShiftsElements.forEach(el => el.classList.toggle('hidden', !canManageShifts));
             UI.manageTicketsElements.forEach(el => el.classList.toggle('hidden', !canManageTickets));
+            UI.viewCsatElements.forEach(el => el.classList.toggle('hidden', !canViewCsat));
 
             if (!canManageAgents) {
                 UI.rosterGrid.style.gridTemplateColumns = "1fr";
@@ -1653,6 +1751,7 @@
                 UI.editPermAgents.checked = user.permissions?.manageAgents || false;
                 UI.editPermShifts.checked = user.permissions?.manageShifts || false;
                 UI.editPermTickets.checked = user.permissions?.manageTickets || false;
+                UI.editPermCsat.checked = user.permissions?.viewCsat || false;
                 UI.modalEditUser.classList.add('active');
             }
         };
@@ -1687,7 +1786,8 @@
                 user.permissions = {
                     manageAgents: UI.editPermAgents.checked,
                     manageShifts: UI.editPermShifts.checked,
-                    manageTickets: UI.editPermTickets.checked
+                    manageTickets: UI.editPermTickets.checked,
+                    viewCsat: UI.editPermCsat.checked
                 };
                 State.commit(['users']);
                 syncUI();
@@ -1967,7 +2067,8 @@
                 permissions: {
                     manageAgents: UI.inputPermAgents.checked,
                     manageShifts: UI.inputPermShifts.checked,
-                    manageTickets: UI.inputPermTickets.checked
+                    manageTickets: UI.inputPermTickets.checked,
+                    viewCsat: UI.inputPermCsat.checked
                 }
             });
             State.commit(['users']);
@@ -1977,6 +2078,7 @@
             UI.inputPermAgents.checked = false;
             UI.inputPermShifts.checked = false;
             UI.inputPermTickets.checked = false;
+            UI.inputPermCsat.checked = false;
             renderUsersTable();
             notify("New user account created.");
         }
@@ -2298,8 +2400,11 @@
 
         /** --- RENDER ENGINE --- **/
         function syncUI() {
-            const todayDate = new Date().toISOString().split('T')[0];
-            const ticketsToday = State.tickets.filter(t => t.date === todayDate).length;
+            const todayWindow = getTodayShiftWindow();
+            const ticketsToday = State.tickets.filter(t => {
+                const ts = parseTicketTimestamp(t);
+                return ts >= todayWindow.start && ts <= todayWindow.end;
+            }).length;
             
             const activeSupportCount = State.agents.filter(a => a.isAvailable && a.role === 'support').length;
             const activeCseCount = State.agents.filter(a => a.isAvailable && a.role === 'cse').length;
@@ -2607,16 +2712,36 @@
             return d;
         }
 
+        // The team's "day" is a 9pm-6am overnight shift, not a calendar day -- e.g. if today
+        // is 20/07/2026, "Today" means 20/07/2026 21:00 through 21/07/2026 06:00.
+        function getTodayShiftWindow() {
+            const now = new Date();
+            // Shift day rolls over at 6am, not midnight -- before 6am we're still inside
+            // last night's shift (started yesterday 9pm), so anchor to yesterday's date.
+            const shiftDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+            if (now.getHours() < 6) {
+                shiftDate.setDate(shiftDate.getDate() - 1);
+            }
+            const start = new Date(shiftDate.getFullYear(), shiftDate.getMonth(), shiftDate.getDate(), 21, 0, 0, 0);
+            const end = new Date(start);
+            end.setDate(end.getDate() + 1);
+            end.setHours(6, 0, 0, 0);
+            return { start, end };
+        }
+
         function getChartDateRange() {
             const selection = UI.chartRangeSelect.value;
             const now = new Date();
 
+            if (selection === 'today') {
+                return getTodayShiftWindow();
+            }
+
             if (selection === 'custom') {
                 if (!UI.chartStart.value || !UI.chartEnd.value) {
-                    const todayStart = new Date(now);
-                    todayStart.setHours(0, 0, 0, 0);
-                    if (!UI.chartStart.value) UI.chartStart.value = toDatetimeLocalValue(todayStart);
-                    if (!UI.chartEnd.value) UI.chartEnd.value = toDatetimeLocalValue(now);
+                    const todayWindow = getTodayShiftWindow();
+                    if (!UI.chartStart.value) UI.chartStart.value = toDatetimeLocalValue(todayWindow.start);
+                    if (!UI.chartEnd.value) UI.chartEnd.value = toDatetimeLocalValue(todayWindow.end);
                 }
                 const start = new Date(UI.chartStart.value);
                 const end = new Date(UI.chartEnd.value);
@@ -3394,6 +3519,169 @@
             }
         };
 
+        let csatCache = [];
+
+        function getCsatDateRange() {
+            const now = new Date();
+
+            if (UI.csatRangeSelect.value === 'custom') {
+                if (!UI.csatStart.value || !UI.csatEnd.value) {
+                    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+                    if (!UI.csatStart.value) UI.csatStart.value = toDatetimeLocalValue(monthStart);
+                    if (!UI.csatEnd.value) UI.csatEnd.value = toDatetimeLocalValue(now);
+                }
+                return { start: new Date(UI.csatStart.value), end: new Date(UI.csatEnd.value) };
+            }
+
+            const start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+            return { start, end: now };
+        }
+
+        async function fetchSatisfactionRatings(zd, startUnix, endUnix, score) {
+            let results = [];
+            let target = `https://${zd.subdomain}.zendesk.com/api/v2/satisfaction_ratings.json?start_time=${startUnix}&end_time=${endUnix}&score=${score}`;
+            while (target) {
+                const res = await zendeskFetch(target, { method: 'GET' });
+                if (!res.ok) throw new Error(`Zendesk returned ${res.status}`);
+                const data = await res.json();
+                results = results.concat(data.satisfaction_ratings || []);
+                target = data.next_page || null;
+            }
+            return results;
+        }
+
+        // Zendesk requires end_time to be more than 60 seconds in the past.
+        async function fetchCsatData() {
+            const zd = State.settings.zendesk;
+            if (!zd || !zd.subdomain || !zd.email || !zd.apiToken || !zd.proxyUrl) {
+                UI.tableCsat.innerHTML = `<tr><td colspan="7" style="text-align:center; color: var(--text-muted); padding: 2rem;">Configure Zendesk in <a href="admin.html">admin.html</a>, then click Refresh.</td></tr>`;
+                UI.statCsatGood.innerText = '0';
+                UI.statCsatBad.innerText = '0';
+                return;
+            }
+
+            const range = getCsatDateRange();
+            const startUnix = Math.floor(range.start.getTime() / 1000);
+            const endUnixCap = Math.floor(Date.now() / 1000) - 120;
+            const endUnix = Math.min(Math.floor(range.end.getTime() / 1000), endUnixCap);
+
+            UI.csatStatus.innerText = 'Loading…';
+            UI.tableCsat.innerHTML = `<tr><td colspan="7" style="text-align:center; color: var(--text-muted); padding: 2rem;">Loading ratings from Zendesk…</td></tr>`;
+
+            try {
+                const [goodRatings, badRatings] = await Promise.all([
+                    fetchSatisfactionRatings(zd, startUnix, endUnix, 'good'),
+                    fetchSatisfactionRatings(zd, startUnix, endUnix, 'bad')
+                ]);
+                const allRatings = goodRatings.concat(badRatings);
+
+                const assigneeIds = [...new Set(allRatings.map(r => r.assignee_id).filter(Boolean))];
+                const infoById = {};
+                if (assigneeIds.length > 0) {
+                    const target = `https://${zd.subdomain}.zendesk.com/api/v2/users/show_many.json?ids=${assigneeIds.join(',')}`;
+                    const res = await zendeskFetch(target, { method: 'GET' });
+                    if (!res.ok) throw new Error(`Zendesk returned ${res.status}`);
+                    const data = await res.json();
+                    (data.users || []).forEach(u => { infoById[u.id] = { email: u.email || '', name: u.name }; });
+                }
+
+                const groups = {};
+                allRatings.forEach(r => {
+                    const info = infoById[r.assignee_id];
+                    const agent = info && info.email
+                        ? State.agents.find(a => a.zendeskEmail && a.zendeskEmail.toLowerCase() === info.email.toLowerCase())
+                        : null;
+                    const key = agent ? agent.id : (info ? `zd-${r.assignee_id}` : 'unknown');
+                    const displayName = agent ? agent.name : (info ? `${info.name} (unmatched)` : 'Unassigned');
+
+                    if (!groups[key]) {
+                        groups[key] = { name: displayName, goodWith: 0, goodWithout: 0, badWith: 0, badWithout: 0, ratings: [] };
+                    }
+                    const hasComment = !!(r.comment && r.comment.trim());
+                    if (r.score === 'good') {
+                        hasComment ? groups[key].goodWith++ : groups[key].goodWithout++;
+                    } else if (r.score === 'bad') {
+                        hasComment ? groups[key].badWith++ : groups[key].badWithout++;
+                    }
+                    groups[key].ratings.push(r);
+                });
+
+                csatCache = Object.entries(groups)
+                    .map(([key, g]) => ({ key, ...g }))
+                    .sort((a, b) => a.name.localeCompare(b.name));
+
+                UI.statCsatGood.innerText = goodRatings.length;
+                UI.statCsatBad.innerText = badRatings.length;
+                renderCsatTable();
+                UI.csatStatus.innerText = `Updated ${getFormattedTime()}`;
+            } catch (err) {
+                console.error(err);
+                UI.csatStatus.innerText = '';
+                UI.tableCsat.innerHTML = `<tr><td colspan="7" style="text-align:center; color: #f43f5e; padding: 2rem;">Couldn't load CSAT data. Check Zendesk settings in admin.html and the console.</td></tr>`;
+                notify("Failed to load CSAT data.");
+            }
+        }
+
+        function renderCsatTable() {
+            UI.tableCsat.innerHTML = '';
+
+            if (csatCache.length === 0) {
+                UI.tableCsat.innerHTML = `<tr><td colspan="7" style="text-align:center; color: var(--text-muted); padding: 2rem;">No satisfaction ratings in this range.</td></tr>`;
+                return;
+            }
+
+            csatCache.forEach(g => {
+                const total = g.goodWith + g.goodWithout + g.badWith + g.badWithout;
+                UI.tableCsat.insertAdjacentHTML('beforeend', `
+                    <tr id="csat-row-${g.key}">
+                        <td>
+                            <button class="btn-icon" title="View ratings" onclick="window.toggleCsatDetail('${g.key}')">
+                                <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                            </button>
+                        </td>
+                        <td>${escapeHtml(g.name)}</td>
+                        <td>${g.goodWith}</td>
+                        <td>${g.goodWithout}</td>
+                        <td>${g.badWith}</td>
+                        <td>${g.badWithout}</td>
+                        <td>${total}</td>
+                    </tr>
+                `);
+            });
+        }
+
+        window.toggleCsatDetail = function(key) {
+            const existing = document.getElementById(`csat-detail-${key}`);
+            if (existing) { existing.remove(); return; }
+
+            const group = csatCache.find(g => g.key === key);
+            const row = document.getElementById(`csat-row-${key}`);
+            if (!group || !row) return;
+
+            const sorted = [...group.ratings].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+            const itemsHtml = sorted.map(r => {
+                const badgeStyle = r.score === 'good'
+                    ? 'background: rgba(16, 185, 129, 0.15); color: #10b981;'
+                    : 'background: rgba(244, 63, 94, 0.15); color: #f43f5e;';
+                return `
+                    <div style="padding: 0.6rem 0; border-bottom: 1px solid var(--border-light);">
+                        <div style="display:flex; gap:0.5rem; align-items:center; margin-bottom:0.25rem;">
+                            <span class="priority-badge" style="${badgeStyle}">${r.score === 'good' ? 'Good' : 'Bad'}</span>
+                            <a href="https://${State.settings.zendesk.subdomain}.zendesk.com/agent/tickets/${r.ticket_id}" target="_blank" rel="noopener">#${r.ticket_id}</a>
+                            <span style="color: var(--text-muted); font-size: 0.8rem;">${formatZendeskTimestamp(r.created_at)}</span>
+                        </div>
+                        <div style="color: var(--text-muted);">${escapeHtml(r.comment || '(no comment)')}</div>
+                    </div>
+                `;
+            }).join('');
+
+            row.insertAdjacentHTML('afterend', `
+                <tr id="csat-detail-${key}">
+                    <td colspan="7"><div class="summary-box">${itemsHtml}</div></td>
+                </tr>
+            `);
+        };
+
         function switchView(clickedNav) {
             UI.navItems.forEach(n => n.classList.remove('active'));
             clickedNav.classList.add('active');
@@ -3404,6 +3692,8 @@
                 updateChart();
             } else if (clickedNav.dataset.target === 'view-zendesk-queue') {
                 refreshActiveZendeskTab();
+            } else if (clickedNav.dataset.target === 'view-csat') {
+                fetchCsatData();
             }
         }
 
