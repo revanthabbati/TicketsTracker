@@ -1792,7 +1792,7 @@
             const id = UI.editUserId.value;
             const user = State.users.find(u => u.id === id);
             if (user) {
-                user.email = UI.editUserEmail.value.trim();
+                user.email = UI.editUserEmail.value.trim().toLowerCase();
                 user.role = UI.editUserRole.value;
                 user.zendeskAgentEmail = UI.editUserZendesk.value.trim();
                 user.permissions = {
@@ -2067,11 +2067,13 @@
         /** --- CORE ACTIONS --- **/
         function processAddUser(e) {
             e.preventDefault();
-            const email = UI.inputUserEmail.value.trim();
+            // Lowercased to match handleLogin's case-insensitive comparison -- otherwise two
+            // differently-cased emails could both exist as "distinct" users yet collide at login.
+            const email = UI.inputUserEmail.value.trim().toLowerCase();
             const pass = UI.inputUserPass.value.trim();
             const zendeskAgentEmail = UI.inputUserZendesk.value.trim();
 
-            if (State.users.some(u => u.email === email)) {
+            if (State.users.some(u => u.email.toLowerCase() === email)) {
                 notify("A user with this email already exists.");
                 return;
             }
@@ -2580,6 +2582,7 @@
                     if (u.permissions.manageAgents) permBadges += `<span class="badge badge-perm">Agents</span>`;
                     if (u.permissions.manageShifts) permBadges += `<span class="badge badge-perm">Shifts</span>`;
                     if (u.permissions.manageTickets) permBadges += `<span class="badge badge-perm" style="color: #4f46e5; background:rgba(79, 70, 229, 0.15);">Tickets</span>`;
+                    if (u.permissions.viewCsat) permBadges += `<span class="badge badge-perm" style="color: #10b981; background:rgba(16, 185, 129, 0.15);">CSAT</span>`;
                 }
 
                 const isSelf = State.currentUser.id === u.id;
