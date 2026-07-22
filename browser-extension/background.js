@@ -1,11 +1,8 @@
 importScripts('firestore.js');
 
 const ALARM_NAME = 'pollTickets';
-const BADGE_RED = '#f43f5e';
-const BADGE_GREEN = '#10b981';
 const MAX_INDIVIDUAL_NOTIFICATIONS = 5;
 const MAX_KNOWN_IDS = 300;
-const MAX_STORED_LINKS = 100;
 
 chrome.runtime.onInstalled.addListener((details) => {
     chrome.alarms.create(ALARM_NAME, { periodInMinutes: 1 });
@@ -27,25 +24,34 @@ chrome.runtime.onMessage.addListener((message) => {
     if (message && message.type === 'pollNow') checkForNewAssignments();
 });
 
+// Clicking a per-ticket notification opens the ticket AND marks it read --
+// you clearly just looked at it. Summary notifications (>5 new at once) have
+// no single ticket to open or mark, so just dismiss.
 chrome.notifications.onClicked.addListener(async (notificationId) => {
-    const { notificationLinks = {} } = await chrome.storage.local.get('notificationLinks');
-    const link = notificationLinks[notificationId];
-    if (link) chrome.tabs.create({ url: link });
     chrome.notifications.clear(notificationId);
+    if (!notificationId.startsWith('ticket-')) return;
+
+    const ticketId = notificationId.slice('ticket-'.length);
+    const { myTickets = [] } = await chrome.storage.local.get('myTickets');
+    const ticket = myTickets.find(t => t.id === ticketId);
+    if (ticket) chrome.tabs.create({ url: ticket.link });
+    await markTicketsRead([ticketId]);
 });
 
 async function checkForNewAssignments() {
     try {
-        const { agentId, knownTicketIds } = await chrome.storage.local.get(['agentId', 'knownTicketIds']);
+        const { agentId, knownTicketIds, readTicketIds } = await chrome.storage.local.get(['agentId', 'knownTicketIds', 'readTicketIds']);
         if (!agentId) {
             chrome.action.setBadgeText({ text: '' });
             return;
         }
 
-        const { tickets } = await fetchState();
+        const { tickets, settings } = await fetchState();
         const myTickets = tickets
             .filter(t => t.agentId === agentId)
             .sort((a, b) => parseTicketTimestamp(b) - parseTicketTimestamp(a));
+
+        await enrichWithSubjects(myTickets, settings && settings.zendesk);
 
         // First run for this identity: seed known ids without notifying, so a
         // fresh install (or switching to a different agent) doesn't fire one
@@ -55,7 +61,7 @@ async function checkForNewAssignments() {
                 knownTicketIds: myTickets.map(t => t.id),
                 myTickets
             });
-            updateBadge(myTickets);
+            applyBadge(computeBadge(myTickets, readTicketIds));
             return;
         }
 
@@ -63,18 +69,18 @@ async function checkForNewAssignments() {
         const newOnes = myTickets.filter(t => !knownSet.has(t.id));
 
         if (newOnes.length > 0) {
-            await notifyNewAssignments(newOnes);
+            notifyNewAssignments(newOnes);
         }
 
         const updatedKnown = Array.from(new Set([...knownTicketIds, ...myTickets.map(t => t.id)])).slice(-MAX_KNOWN_IDS);
         await chrome.storage.local.set({ knownTicketIds: updatedKnown, myTickets });
-        updateBadge(myTickets);
+        applyBadge(computeBadge(myTickets, readTicketIds));
     } catch (err) {
         console.error('Tracker Notifier: poll failed', err);
     }
 }
 
-async function notifyNewAssignments(newOnes) {
+function notifyNewAssignments(newOnes) {
     if (newOnes.length > MAX_INDIVIDUAL_NOTIFICATIONS) {
         chrome.notifications.create(`summary-${Date.now()}`, {
             type: 'basic',
@@ -85,36 +91,15 @@ async function notifyNewAssignments(newOnes) {
         return;
     }
 
-    const { notificationLinks = {} } = await chrome.storage.local.get('notificationLinks');
-
     for (const t of newOnes) {
-        const id = `ticket-${t.id}`;
         const icon = t.irSent ? 'icons/notify-green.png' : 'icons/notify-red.png';
-        chrome.notifications.create(id, {
+        const subjectLine = t.subject ? t.subject.substring(0, 80) : '(no subject)';
+        const statusLine = t.irSent ? 'IR already sent' : 'IR not sent yet';
+        chrome.notifications.create(`ticket-${t.id}`, {
             type: 'basic',
             iconUrl: icon,
-            title: 'New ticket assigned',
-            message: `#${ticketRef(t)} — ${t.irSent ? 'IR already sent' : 'IR not sent yet'}`
+            title: `New ticket assigned: #${ticketRef(t)}`,
+            message: `${subjectLine}\n${statusLine}`
         });
-        notificationLinks[id] = t.link;
-    }
-
-    // Bound storage growth -- keep only the most recently added link mappings.
-    const trimmed = Object.fromEntries(Object.entries(notificationLinks).slice(-MAX_STORED_LINKS));
-    await chrome.storage.local.set({ notificationLinks: trimmed });
-}
-
-function updateBadge(myTickets) {
-    if (myTickets.length === 0) {
-        chrome.action.setBadgeText({ text: '' });
-        return;
-    }
-    const pending = myTickets.filter(t => !t.irSent).length;
-    if (pending > 0) {
-        chrome.action.setBadgeBackgroundColor({ color: BADGE_RED });
-        chrome.action.setBadgeText({ text: String(Math.min(pending, 99)) });
-    } else {
-        chrome.action.setBadgeBackgroundColor({ color: BADGE_GREEN });
-        chrome.action.setBadgeText({ text: '✓' });
     }
 }

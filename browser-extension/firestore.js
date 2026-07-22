@@ -33,8 +33,9 @@ function parseFirestoreFields(fields, key) {
     return parseFirestoreValue(fields[key]) || [];
 }
 
-// Fetches the tracker's shared state doc and returns plain { tickets, agents }
-// arrays. Throws on any network/HTTP failure -- callers decide how to handle it.
+// Fetches the tracker's shared state doc and returns plain { tickets, agents,
+// settings } data. Throws on any network/HTTP failure -- callers decide how
+// to handle it.
 async function fetchState() {
     const res = await fetch(FIRESTORE_DOC_URL);
     if (!res.ok) throw new Error(`Firestore returned ${res.status}`);
@@ -42,8 +43,75 @@ async function fetchState() {
     const fields = data.fields || {};
     return {
         tickets: parseFirestoreFields(fields, 'tickets'),
-        agents: parseFirestoreFields(fields, 'agents')
+        agents: parseFirestoreFields(fields, 'agents'),
+        settings: fields.settings ? parseFirestoreValue(fields.settings) : {}
     };
+}
+
+// Manually-pasted tickets only ever carry a `link`; Zendesk Queue tickets also
+// carry `zendeskId`. Either way we need the real numeric Zendesk ticket id to
+// look up its subject.
+function extractZendeskTicketId(t) {
+    if (t.zendeskId) return Number(t.zendeskId);
+    const match = /(\d+)\/?$/.exec((t.link || '').trim());
+    return match ? Number(match[1]) : null;
+}
+
+// Batch-resolves ticket subjects through the same Cloudflare Worker proxy +
+// shared API token the main app already uses (index.html's zendeskFetch) --
+// same credentials, same host, nothing new to trust.
+async function fetchTicketSubjects(zendeskSettings, ticketIds) {
+    if (!zendeskSettings || !zendeskSettings.subdomain || !zendeskSettings.apiToken || !zendeskSettings.email || !zendeskSettings.proxyUrl) return {};
+    if (!ticketIds || ticketIds.length === 0) return {};
+
+    const authValue = btoa(`${zendeskSettings.email}/token:${zendeskSettings.apiToken}`);
+    const proxyUrl = zendeskSettings.proxyUrl.replace(/\/+$/, '');
+    const result = {};
+    const CHUNK_SIZE = 100;
+
+    for (let i = 0; i < ticketIds.length; i += CHUNK_SIZE) {
+        const chunk = ticketIds.slice(i, i + CHUNK_SIZE);
+        const target = `https://${zendeskSettings.subdomain}.zendesk.com/api/v2/tickets/show_many.json?ids=${chunk.join(',')}`;
+        const url = `${proxyUrl}?target=${encodeURIComponent(target)}`;
+        try {
+            const res = await fetch(url, { headers: { Authorization: `Basic ${authValue}` } });
+            if (!res.ok) continue;
+            const data = await res.json();
+            (data.tickets || []).forEach(zt => { result[zt.id] = zt.subject || ''; });
+        } catch (err) {
+            console.error('Tracker Notifier: failed to fetch ticket subjects', err);
+        }
+    }
+    return result;
+}
+
+// Adds a `.subject` field to each ticket in place, using a persisted cache so
+// only genuinely-new Zendesk ticket ids ever need a live API call. Shared by
+// background.js and popup.js -- both load this file, one via importScripts,
+// one via a <script> tag.
+async function enrichWithSubjects(myTickets, zendeskSettings) {
+    const { ticketSubjects = {} } = await chrome.storage.local.get('ticketSubjects');
+    const zidByTicketId = new Map();
+    const idsNeeded = new Set();
+
+    myTickets.forEach(t => {
+        const zid = extractZendeskTicketId(t);
+        if (zid == null) return;
+        zidByTicketId.set(t.id, zid);
+        if (ticketSubjects[zid] == null) idsNeeded.add(zid);
+    });
+
+    let cache = ticketSubjects;
+    if (idsNeeded.size > 0 && zendeskSettings) {
+        const fetched = await fetchTicketSubjects(zendeskSettings, Array.from(idsNeeded));
+        cache = Object.fromEntries(Object.entries({ ...ticketSubjects, ...fetched }).slice(-MAX_CACHED_SUBJECTS));
+        await chrome.storage.local.set({ ticketSubjects: cache });
+    }
+
+    myTickets.forEach(t => {
+        const zid = zidByTicketId.get(t.id);
+        if (zid != null && cache[zid] != null) t.subject = cache[zid];
+    });
 }
 
 // A ticket's own id is an internal UUID, not something an agent recognizes --
@@ -68,4 +136,55 @@ function parseTicketTimestamp(t) {
         d.setHours(hours, minutes, 0, 0);
     }
     return d;
+}
+
+const MAX_READ_IDS = 500;
+const MAX_CACHED_SUBJECTS = 1000;
+const BADGE_RED = '#f43f5e';
+const BADGE_GREEN = '#10b981';
+
+// "Read" is a separate concept from irSent -- irSent is a fact about the
+// ticket itself (shared, comes from Firestore); read/unread is purely this
+// browser's local acknowledgment that *this agent* has seen it, so it never
+// touches Firestore.
+function unreadTickets(myTickets, readTicketIds) {
+    const readSet = new Set(readTicketIds || []);
+    return myTickets.filter(t => !readSet.has(t.id));
+}
+
+function computeBadge(myTickets, readTicketIds) {
+    const unread = unreadTickets(myTickets, readTicketIds);
+    if (unread.length === 0) return { text: '', color: null };
+    const pending = unread.filter(t => !t.irSent).length;
+    if (pending > 0) return { text: String(Math.min(pending, 99)), color: BADGE_RED };
+    return { text: '✓', color: BADGE_GREEN };
+}
+
+function applyBadge(badge) {
+    if (!badge.text) {
+        chrome.action.setBadgeText({ text: '' });
+        return;
+    }
+    chrome.action.setBadgeBackgroundColor({ color: badge.color });
+    chrome.action.setBadgeText({ text: badge.text });
+}
+
+// Shared by background.js (notification click) and popup.js (mark-read
+// button) -- both just mutate the same chrome.storage.local state, then
+// recompute the badge from whatever myTickets snapshot is currently cached.
+async function markTicketsRead(ticketIds) {
+    const { readTicketIds = [], myTickets = [] } = await chrome.storage.local.get(['readTicketIds', 'myTickets']);
+    const updated = Array.from(new Set([...readTicketIds, ...ticketIds])).slice(-MAX_READ_IDS);
+    await chrome.storage.local.set({ readTicketIds: updated });
+    applyBadge(computeBadge(myTickets, updated));
+    return updated;
+}
+
+async function markTicketsUnread(ticketIds) {
+    const { readTicketIds = [], myTickets = [] } = await chrome.storage.local.get(['readTicketIds', 'myTickets']);
+    const removeSet = new Set(ticketIds);
+    const updated = readTicketIds.filter(id => !removeSet.has(id));
+    await chrome.storage.local.set({ readTicketIds: updated });
+    applyBadge(computeBadge(myTickets, updated));
+    return updated;
 }
