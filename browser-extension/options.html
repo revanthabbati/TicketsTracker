@@ -1,0 +1,29 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Tracker Notifier — Setup</title>
+<style>
+    body { font-family: -apple-system, Segoe UI, Roboto, sans-serif; background: #0f0f17; color: #e2e8f0; max-width: 480px; margin: 40px auto; padding: 0 20px; }
+    h1 { font-size: 1.3rem; }
+    p { color: #94a3b8; font-size: 0.9rem; line-height: 1.5; }
+    label { display: block; font-size: 0.85rem; margin-bottom: 6px; color: #cbd5e1; }
+    select, button { width: 100%; padding: 10px; font-size: 0.9rem; border-radius: 8px; border: 1px solid rgba(255,255,255,0.15); background: #1a1a26; color: #e2e8f0; box-sizing: border-box; }
+    select { margin-bottom: 14px; }
+    button { background: #6366f1; border: none; cursor: pointer; font-weight: 600; }
+    button:hover { background: #4f46e5; }
+    #status { margin-top: 12px; font-size: 0.85rem; color: #10b981; min-height: 1.2em; }
+    #status.error { color: #f43f5e; }
+</style>
+</head>
+<body>
+    <h1>Tickets Assignment Tracker Notifier</h1>
+    <p>Pick your name so this extension knows which ticket assignments are yours. You'll get a notification whenever a new ticket is assigned to you — red if the initial response hasn't been sent yet, green if it has.</p>
+    <label for="agent-select">Your name</label>
+    <select id="agent-select"><option value="">Loading agents…</option></select>
+    <button id="btn-save">Save</button>
+    <div id="status"></div>
+    <script src="firestore.js"></script>
+    <script src="options.js"></script>
+</body>
+</html>

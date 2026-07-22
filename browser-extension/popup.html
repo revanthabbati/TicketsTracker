@@ -1,0 +1,48 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Tracker Notifier</title>
+<style>
+    body { width: 340px; margin: 0; font-family: -apple-system, Segoe UI, Roboto, sans-serif; background: #12121c; color: #e2e8f0; }
+    .header { padding: 12px 14px; border-bottom: 1px solid rgba(255,255,255,0.08); }
+    .header h1 { font-size: 0.95rem; margin: 0 0 2px; font-weight: 700; }
+    .header p { font-size: 0.78rem; margin: 0; color: #94a3b8; }
+    .header a { color: #a855f7; text-decoration: none; }
+    .actions { display: flex; justify-content: space-between; align-items: center; padding: 8px 14px; }
+    .actions button { background: transparent; border: 1px solid rgba(255,255,255,0.15); color: #e2e8f0; border-radius: 6px; padding: 4px 10px; font-size: 0.75rem; cursor: pointer; }
+    .actions button:hover { background: rgba(255,255,255,0.06); }
+    #list { max-height: 360px; overflow-y: auto; }
+    .row { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 0.82rem; }
+    .dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+    .dot.red { background: #f43f5e; }
+    .dot.green { background: #10b981; }
+    .row a { color: #e2e8f0; text-decoration: none; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .row a:hover { text-decoration: underline; }
+    .row .time { color: #64748b; font-size: 0.72rem; flex-shrink: 0; }
+    .empty, .setup { padding: 24px 14px; text-align: center; color: #94a3b8; font-size: 0.82rem; }
+    .setup button { margin-top: 10px; background: #6366f1; color: white; border: none; border-radius: 6px; padding: 8px 14px; font-size: 0.82rem; cursor: pointer; }
+    .setup button:hover { background: #4f46e5; }
+    .hidden { display: none; }
+</style>
+</head>
+<body>
+    <div class="header">
+        <h1>Tickets Assignment Tracker</h1>
+        <p id="identity-line">Loading…</p>
+    </div>
+    <div id="setup" class="setup hidden">
+        <div>You haven't set up your name yet.</div>
+        <button id="btn-setup">Set up your name</button>
+    </div>
+    <div id="main" class="hidden">
+        <div class="actions">
+            <span id="summary" style="font-size:0.78rem; color:#94a3b8;"></span>
+            <button id="btn-refresh">Refresh</button>
+        </div>
+        <div id="list"></div>
+    </div>
+    <script src="firestore.js"></script>
+    <script src="popup.js"></script>
+</body>
+</html>

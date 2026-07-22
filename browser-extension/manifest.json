@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "Tickets Assignment Tracker Notifier",
+  "version": "1.0.0",
+  "description": "Local notifier for the Tickets Assignment Tracker -- alerts you when a ticket is assigned to you and shows whether the initial response has been sent.",
+  "permissions": ["storage", "alarms", "notifications"],
+  "host_permissions": ["https://firestore.googleapis.com/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    },
+    "default_title": "Tickets Assignment Tracker Notifier"
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}
