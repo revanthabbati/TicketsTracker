@@ -118,6 +118,10 @@
                                 <span class="stat-label">Active CSM's</span>
                                 <span class="stat-value" id="stat-csm">0</span>
                             </div>
+                            <div class="stat-card orange">
+                                <span class="stat-label">Active Management</span>
+                                <span class="stat-value" id="stat-management">0</span>
+                            </div>
                         </div>
                     </div>
 
@@ -200,6 +204,26 @@
                                     </div>
                                     <div class="action-row" style="margin-bottom:0;">
                                         <button type="submit" class="btn btn-primary" name="action" value="assign" style="background: #10b981;">Assign to CSM</button>
+                                        <button type="submit" class="btn btn-purple" name="action" value="slack">Sync & Slack</button>
+                                    </div>
+                                </form>
+
+                                <hr class="divider">
+
+                                <h3 style="font-size: 0.8rem; text-transform: uppercase; color: var(--text-muted); margin-bottom: 1rem; letter-spacing: 0.05em;">Direct Management Assignment</h3>
+                                <form id="form-management-assign">
+                                    <div class="input-group">
+                                        <label>Select Management Agent</label>
+                                        <select id="management-agent-select" class="input-control" required>
+                                            <option value="">-- No Management Available --</option>
+                                        </select>
+                                    </div>
+                                    <div class="input-group">
+                                        <label>Ticket URL / ID</label>
+                                        <input type="text" id="input-management-ticket" class="input-control" placeholder="Ticket reference..." required autocomplete="off">
+                                    </div>
+                                    <div class="action-row" style="margin-bottom:0;">
+                                        <button type="submit" class="btn btn-primary" name="action" value="assign" style="background: #d97706;">Assign to Management</button>
                                         <button type="submit" class="btn btn-purple" name="action" value="slack">Sync & Slack</button>
                                     </div>
                                 </form>
@@ -294,7 +318,7 @@
                     <div class="view-header-flex" style="margin-bottom: 1.5rem;">
                         <div class="page-title">
                             <h1>Manage Agents</h1>
-                            <p>Manage your active Support, CSE, and CSM team.</p>
+                            <p>Manage your active Support, CSE, CSM, and Management team.</p>
                         </div>
                     </div>
 
@@ -314,6 +338,7 @@
                                             <option value="support">Support Agent (Queue)</option>
                                             <option value="cse">Customer Success (CSE)</option>
                                             <option value="csm">Customer Success Manager (CSM)</option>
+                                            <option value="management">Management / Accounting</option>
                                         </select>
                                     </div>
                                     <div class="input-group">
@@ -722,6 +747,7 @@
                         <option value="support">Support Agent (Queue)</option>
                         <option value="cse">Customer Success (CSE)</option>
                         <option value="csm">Customer Success Manager (CSM)</option>
+                        <option value="management">Management / Accounting</option>
                     </select>
                 </div>
                 <div class="input-group">
@@ -1173,6 +1199,7 @@
             statAgentsSupport: document.getElementById('stat-support'),
             statAgentsCse: document.getElementById('stat-cse'),
             statAgentsCsm: document.getElementById('stat-csm'),
+            statAgentsManagement: document.getElementById('stat-management'),
             statTickets: document.getElementById('stat-tickets'),
             statFiltered: document.getElementById('stat-filtered-tickets'),
 
@@ -1196,6 +1223,11 @@
             formCsmAssign: document.getElementById('form-csm-assign'),
             csmAgentSelect: document.getElementById('csm-agent-select'),
             inputCsmTicket: document.getElementById('input-csm-ticket'),
+
+            // Management Form
+            formManagementAssign: document.getElementById('form-management-assign'),
+            managementAgentSelect: document.getElementById('management-agent-select'),
+            inputManagementTicket: document.getElementById('input-management-ticket'),
 
             activityFeed: document.getElementById('activity-feed'),
             
@@ -1460,6 +1492,7 @@
             UI.formAssign.addEventListener('submit', processTicketAssignment);
             UI.formCseAssign.addEventListener('submit', processCseAssignment);
             UI.formCsmAssign.addEventListener('submit', processCsmAssignment);
+            UI.formManagementAssign.addEventListener('submit', processManagementAssignment);
             UI.btnSkip.addEventListener('click', processSkipQueue);
             
             UI.filterAgent.addEventListener('change', () => { historyDrillRange = null; renderHistoryTable(); });
@@ -1670,7 +1703,7 @@
                     ticket.agentId = newAgent.id;
                     ticket.agentName = newAgent.name;
                     
-                    logActivity(newAgent.name, `ticket was reassigned to them by admin.`);
+                    logActivity(newAgent.name, `<strong>#${shortTicketRef(ticket.link)}</strong> was reassigned to <strong>${newAgent.name}</strong>`);
                 }
                 
                 ticket.link = newUrl;
@@ -2130,7 +2163,7 @@
                 UI.inputAgentSlack.value = '';
                 UI.inputAgentSlackId.value = '';
                 UI.inputAgentZendesk.value = '';
-                logActivity(name, `joined the active Agent List.`);
+                logActivity(name, `<strong>${name}</strong> joined the active Agent List`);
                 State.commit(['agents', 'activities']);
                 syncUI();
                 notify(`Agent "${name}" added.`);
@@ -2264,25 +2297,25 @@
                 currAgent = State.agents[currIdx];
             }
 
-            const shortTicket = link.split('/').pop().substring(0, 8) || 'Ticket';
+            const shortTicket = shortTicketRef(link);
 
             State.tickets.push({
                 id: crypto.randomUUID(),
                 agentId: currAgent.id,
                 agentName: currAgent.name,
                 link: link,
-                date: getLocalDateString(), 
+                date: getLocalDateString(),
                 time: getFormattedTime()
             });
 
             currAgent.total++;
-            
+
             if (!isOverride) {
                 const currIdx = State.agents.indexOf(currAgent);
                 State.queueIdx = getNextAvailableAgentIndex(currIdx + 1);
             }
-            
-            logActivity(currAgent.name, `was assigned to ${shortTicket}`);
+
+            logActivity(currAgent.name, `<strong>#${shortTicket}</strong> was assigned to <strong>${currAgent.name}</strong>`);
             
             UI.inputTicket.value = '';
             UI.overrideAgentSelect.value = '';
@@ -2317,7 +2350,7 @@
             });
 
             currAgent.total++;
-            logActivity(currAgent.name, `was assigned CSE onboarding ${shortTicket}`);
+            logActivity(currAgent.name, `<strong>#${shortTicket}</strong> (CSE Onboarding) was assigned to <strong>${currAgent.name}</strong>`);
 
             UI.inputCseTicket.value = '';
             State.commit(['tickets', 'agents', 'activities']);
@@ -2351,7 +2384,7 @@
             });
 
             currAgent.total++;
-            logActivity(currAgent.name, `was assigned CSM ticket ${shortTicket}`);
+            logActivity(currAgent.name, `<strong>#${shortTicket}</strong> (CSM) was assigned to <strong>${currAgent.name}</strong>`);
 
             UI.inputCsmTicket.value = '';
             State.commit(['tickets', 'agents', 'activities']);
@@ -2359,6 +2392,40 @@
 
             if (!handleSlackRedirect(action, currAgent)) {
                 notify(`Assigned to CSM ${currAgent.name}`);
+            }
+        }
+
+        function processManagementAssignment(e) {
+            e.preventDefault();
+            const action = e.submitter ? e.submitter.value : 'assign';
+            const link = UI.inputManagementTicket.value.trim();
+            const agentId = UI.managementAgentSelect.value;
+
+            if (!agentId) return notify("No Management agent selected.");
+
+            const currAgent = State.agents.find(a => a.id === agentId);
+            if(!currAgent) return;
+
+            const shortTicket = link.split('/').pop().substring(0, 8) || 'Management Ticket';
+
+            State.tickets.push({
+                id: crypto.randomUUID(),
+                agentId: currAgent.id,
+                agentName: currAgent.name,
+                link: link,
+                date: getLocalDateString(),
+                time: getFormattedTime()
+            });
+
+            currAgent.total++;
+            logActivity(currAgent.name, `<strong>#${shortTicket}</strong> (Management) was assigned to <strong>${currAgent.name}</strong>`);
+
+            UI.inputManagementTicket.value = '';
+            State.commit(['tickets', 'agents', 'activities']);
+            syncUI();
+
+            if (!handleSlackRedirect(action, currAgent)) {
+                notify(`Assigned to Management ${currAgent.name}`);
             }
         }
 
@@ -2379,9 +2446,9 @@
             
             const nextAgent = State.agents[nextIdx];
             if (skippedAgent.id !== nextAgent.id) {
-                logActivity(skippedAgent.name, `skipped ticket to ${nextAgent.name}`);
+                logActivity(skippedAgent.name, `Queue skipped from <strong>${skippedAgent.name}</strong> to <strong>${nextAgent.name}</strong>`);
             } else {
-                logActivity(skippedAgent.name, `skipped ticket, but no others available.`);
+                logActivity(skippedAgent.name, `Queue skip attempted from <strong>${skippedAgent.name}</strong>, but no other agents are available`);
             }
 
             State.commit(['queueIdx', 'activities']);
@@ -2402,13 +2469,21 @@
             }
         }
 
+        // `text` must be a complete, self-contained sentence (including the agent's name where
+        // relevant) -- this no longer auto-prepends "[agentName]", since for assignment actions
+        // that read backwards (e.g. "[Akash Pandit] was assigned ticket #X (by akash.pandit)" looks
+        // like Akash assigned it to himself). Callers phrase it as "#X was assigned to Akash Pandit".
         function logActivity(agentName, text) {
             const userInitiator = State.currentUser ? State.currentUser.email.split('@')[0] : 'System';
             State.activities.unshift({
                 agentName,
-                text: `<strong>[${agentName}]</strong> ${text} <span style="font-size: 0.75rem; opacity:0.6;">(by ${userInitiator})</span>`,
+                text: `${text} <span style="font-size: 0.75rem; opacity:0.6;">by ${userInitiator}</span>`,
                 time: getFormattedTime()
             });
+        }
+
+        function shortTicketRef(link) {
+            return (link || '').split('/').pop().substring(0, 8) || 'Ticket';
         }
 
         function toggleTheme() {
@@ -2429,11 +2504,13 @@
             const activeSupportCount = State.agents.filter(a => a.isAvailable && a.role === 'support').length;
             const activeCseCount = State.agents.filter(a => a.isAvailable && a.role === 'cse').length;
             const activeCsmCount = State.agents.filter(a => a.isAvailable && a.role === 'csm').length;
-            
+            const activeManagementCount = State.agents.filter(a => a.isAvailable && a.role === 'management').length;
+
             UI.statTickets.innerText = ticketsToday;
             UI.statAgentsSupport.innerText = activeSupportCount;
             UI.statAgentsCse.innerText = activeCseCount;
             UI.statAgentsCsm.innerText = activeCsmCount;
+            UI.statAgentsManagement.innerText = activeManagementCount;
             
             renderAssignQueue();
             populateAssignmentDropdowns();
@@ -2474,6 +2551,16 @@
                 availableCsms.forEach(a => { UI.csmAgentSelect.insertAdjacentHTML('beforeend', `<option value="${a.id}">${a.name}</option>`); });
             }
             UI.csmAgentSelect.value = currentCsmSel;
+
+            const currentManagementSel = UI.managementAgentSelect.value;
+            UI.managementAgentSelect.innerHTML = '<option value="">-- Select Available Management --</option>';
+            const availableManagement = State.agents.filter(a => a.role === 'management' && a.isAvailable);
+            if (availableManagement.length === 0) {
+                UI.managementAgentSelect.innerHTML = '<option value="">-- No Management Available --</option>';
+            } else {
+                availableManagement.forEach(a => { UI.managementAgentSelect.insertAdjacentHTML('beforeend', `<option value="${a.id}">${a.name}</option>`); });
+            }
+            UI.managementAgentSelect.value = currentManagementSel;
         }
 
         function renderAssignQueue() {
@@ -2539,6 +2626,7 @@
                 let roleBadge = '';
                 if(a.role === 'cse') roleBadge = '<span class="badge badge-role">CSE</span>';
                 else if(a.role === 'csm') roleBadge = '<span class="badge badge-role" style="background:rgba(126, 34, 206, 0.15); color:#7e22ce;">CSM</span>';
+                else if(a.role === 'management') roleBadge = '<span class="badge badge-role" style="background:rgba(217, 119, 6, 0.15); color:#d97706;">Management</span>';
                 else roleBadge = '<span class="badge badge-role" style="background:rgba(59, 130, 246, 0.15); color:#3b82f6;">Support</span>';
                 
                 let actionHtml = '';
@@ -2978,7 +3066,7 @@
                 const res = await zendeskFetch(target, { method: 'GET' });
                 if (!res.ok) throw new Error(`Zendesk returned ${res.status}`);
                 const data = await res.json();
-                (data.users || []).forEach(u => { zendeskRequesterMap[u.id] = u.name; });
+                (data.users || []).forEach(u => { zendeskRequesterMap[u.id] = { name: u.name, email: u.email || '' }; });
             } catch (err) {
                 console.error(err);
             }
@@ -2994,7 +3082,8 @@
             }
 
             zendeskQueueCache.forEach(t => {
-                const requesterName = zendeskRequesterMap[t.requester_id] || `Requester #${t.requester_id}`;
+                const requester = zendeskRequesterMap[t.requester_id] || { name: `Requester #${t.requester_id}`, email: '' };
+                const ticketUrl = `https://${State.settings.zendesk.subdomain}.zendesk.com/agent/tickets/${t.id}`;
                 const priority = t.priority || 'normal';
                 const createdDisplay = formatZendeskTimestamp(t.created_at);
                 const checked = zendeskSelectedIds.has(t.id) ? 'checked' : '';
@@ -3008,8 +3097,8 @@
                                     <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
                                 </button>
                                 <div>
-                                    <span class="subj">#${t.id} &mdash; ${escapeHtml(t.subject || '(no subject)')}</span>
-                                    <span class="req">${escapeHtml(requesterName)}</span>
+                                    <span class="subj"><a href="${ticketUrl}" target="_blank" rel="noopener">#${t.id}</a> &mdash; ${escapeHtml(t.subject || '(no subject)')}</span>
+                                    <span class="req">${escapeHtml(requester.name)}${requester.email ? ` &lt;${escapeHtml(requester.email)}&gt;` : ''}</span>
                                 </div>
                             </div>
                         </td>
@@ -3095,7 +3184,7 @@
             }
 
             if (successCount > 0) {
-                logActivity('Zendesk Queue', `sent a bulk initial response to ${successCount} unassigned ticket${successCount === 1 ? '' : 's'}`);
+                logActivity('Zendesk Queue', `Bulk initial response sent to ${successCount} unassigned ticket${successCount === 1 ? '' : 's'}`);
                 State.commit(['activities']);
                 syncUI();
             }
@@ -3175,6 +3264,7 @@
             zendeskSuspendedCache.forEach(t => {
                 const author = t.author || {};
                 const requesterName = author.name || author.email || 'Unknown';
+                const requesterEmail = author.name ? (author.email || '') : '';
                 const cause = t.cause || '(no reason given)';
                 const createdDisplay = formatZendeskTimestamp(t.created_at);
 
@@ -3187,7 +3277,7 @@
                                 </button>
                                 <div>
                                     <span class="subj">#${t.id} &mdash; ${escapeHtml(t.subject || '(no subject)')}</span>
-                                    <span class="req">${escapeHtml(requesterName)}</span>
+                                    <span class="req">${escapeHtml(requesterName)}${requesterEmail ? ` &lt;${escapeHtml(requesterEmail)}&gt;` : ''}</span>
                                 </div>
                             </div>
                         </td>
@@ -3384,7 +3474,7 @@
                     source: 'zendesk'
                 });
                 agent.total++;
-                logActivity(agent.name, `was assigned Zendesk ticket #${ticket.id}`);
+                logActivity(agent.name, `<strong>#${ticket.id}</strong> was assigned to <strong>${agent.name}</strong>`);
 
                 if (!usingOther) {
                     const idx = State.agents.indexOf(agent);
@@ -3448,7 +3538,7 @@
                 return;
             }
 
-            const requesterName = zendeskRequesterMap[ticket.requester_id] || 'there';
+            const requesterName = (zendeskRequesterMap[ticket.requester_id] && zendeskRequesterMap[ticket.requester_id].name) || 'there';
             const template = (State.settings.irTemplate || '').trim();
 
             UI.sendIrStatus.innerText = 'Drafting…';
@@ -3520,7 +3610,7 @@
                     irSent: true
                 });
                 agent.total++;
-                logActivity(agent.name, `sent an initial response on Zendesk ticket #${ticket.id}`);
+                logActivity(agent.name, `<strong>#${ticket.id}</strong> — initial response sent, assigned to <strong>${agent.name}</strong>`);
 
                 if (!usingOther) {
                     const idx = State.agents.indexOf(agent);

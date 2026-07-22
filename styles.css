@@ -9,6 +9,7 @@
     --grad-pink: linear-gradient(135deg, #f43f5e, #db2777);
     --grad-brand: linear-gradient(135deg, #a855f7, #6366f1);
     --grad-green: linear-gradient(135deg, #10b981, #059669);
+    --grad-orange: linear-gradient(135deg, #f59e0b, #d97706);
     --shadow-glow: 0 0 20px rgba(99, 102, 241, 0.15);
     --shadow-drop: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
     --chart-bar: rgba(79, 70, 229, 0.8);
@@ -70,6 +71,7 @@ body { background-color: var(--bg-base); color: var(--text-main); height: 100vh;
 .stat-card.pink { background: var(--grad-pink); }
 .stat-card.purple { background: var(--grad-brand); }
 .stat-card.green { background: var(--grad-green); }
+.stat-card.orange { background: var(--grad-orange); }
 .stat-label { font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; opacity: 0.9; margin-bottom: 0.5rem; white-space: nowrap;}
 .stat-value { font-size: 1.8rem; font-weight: 700; }
 
