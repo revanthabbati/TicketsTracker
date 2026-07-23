@@ -2297,6 +2297,12 @@
                 currAgent = State.agents[currIdx];
             }
 
+            if (handleDuplicateIfAny(link, null, currAgent, 'Reassign')) {
+                UI.inputTicket.value = '';
+                UI.overrideAgentSelect.value = '';
+                return;
+            }
+
             const shortTicket = shortTicketRef(link);
 
             State.tickets.push({
@@ -2338,6 +2344,11 @@
             const currAgent = State.agents.find(a => a.id === agentId);
             if(!currAgent) return;
 
+            if (handleDuplicateIfAny(link, null, currAgent, 'Reassign')) {
+                UI.inputCseTicket.value = '';
+                return;
+            }
+
             const shortTicket = link.split('/').pop().substring(0, 8) || 'Onboarding';
 
             State.tickets.push({
@@ -2372,6 +2383,11 @@
             const currAgent = State.agents.find(a => a.id === agentId);
             if(!currAgent) return;
 
+            if (handleDuplicateIfAny(link, null, currAgent, 'Reassign')) {
+                UI.inputCsmTicket.value = '';
+                return;
+            }
+
             const shortTicket = link.split('/').pop().substring(0, 8) || 'CSM Ticket';
 
             State.tickets.push({
@@ -2405,6 +2421,11 @@
 
             const currAgent = State.agents.find(a => a.id === agentId);
             if(!currAgent) return;
+
+            if (handleDuplicateIfAny(link, null, currAgent, 'Reassign')) {
+                UI.inputManagementTicket.value = '';
+                return;
+            }
 
             const shortTicket = link.split('/').pop().substring(0, 8) || 'Management Ticket';
 
@@ -2484,6 +2505,89 @@
 
         function shortTicketRef(link) {
             return (link || '').split('/').pop().substring(0, 8) || 'Ticket';
+        }
+
+        // The real Zendesk ticket id when resolvable (trailing digits in the URL,
+        // or the id itself for Zendesk Queue tickets), else null for arbitrary
+        // pasted references that aren't a Zendesk ticket link.
+        function extractTicketId(link) {
+            const match = /(\d+)\/?$/.exec((link || '').trim());
+            return match ? match[1] : null;
+        }
+
+        // Duplicate-assignment guard: the same real ticket must only ever have one
+        // assignment record. Matches by resolved Zendesk ticket id first (so a
+        // manually-pasted link and a Zendesk Queue assignment of the same ticket
+        // are recognized as the same ticket), falling back to an exact link match
+        // for non-Zendesk references.
+        function findExistingTicketAssignment(link, zendeskId) {
+            const targetId = zendeskId != null ? String(zendeskId) : extractTicketId(link);
+            const trimmedLink = (link || '').trim();
+            return State.tickets.find(t => {
+                if (targetId) {
+                    const tId = t.zendeskId != null ? String(t.zendeskId) : extractTicketId(t.link);
+                    if (tId && tId === targetId) return true;
+                }
+                return !!trimmedLink && t.link && t.link.trim() === trimmedLink;
+            });
+        }
+
+        // Moves an already-assigned ticket to a different agent in place (rather
+        // than leaving a duplicate record behind): decrements the old agent's
+        // total, increments the new agent's, and logs it as a reassignment.
+        function reassignExistingTicket(existingTicket, newAgent, extraFields) {
+            const oldAgent = State.agents.find(a => a.id === existingTicket.agentId);
+            const oldAgentName = existingTicket.agentName;
+            if (oldAgent) oldAgent.total = Math.max(0, oldAgent.total - 1);
+            newAgent.total++;
+            existingTicket.agentId = newAgent.id;
+            existingTicket.agentName = newAgent.name;
+            if (extraFields) Object.assign(existingTicket, extraFields);
+            logActivity(newAgent.name, `<strong>#${shortTicketRef(existingTicket.link)}</strong> was reassigned from <strong>${oldAgentName}</strong> to <strong>${newAgent.name}</strong>`);
+        }
+
+        // Shared by every assign flow: if the ticket is already assigned to someone
+        // else, ask before moving it to the new agent; if it's already assigned to
+        // the SAME agent, just say so. Returns true if the caller should stop
+        // (either handled here, or the user declined), false to proceed normally.
+        function handleDuplicateIfAny(link, zendeskId, newAgent, actionVerb) {
+            const existing = findExistingTicketAssignment(link, zendeskId);
+            if (!existing) return false;
+
+            if (existing.agentId === newAgent.id) {
+                notify(`Ticket #${shortTicketRef(link)} is already assigned to ${newAgent.name}.`);
+                return true;
+            }
+
+            const confirmed = confirm(`Ticket #${shortTicketRef(link)} is already assigned to ${existing.agentName}. ${actionVerb} it to ${newAgent.name}?`);
+            if (!confirmed) return true;
+
+            reassignExistingTicket(existing, newAgent);
+            State.commit(['tickets', 'agents', 'activities']);
+            syncUI();
+            notify(`Reassigned to ${newAgent.name}`);
+            return true;
+        }
+
+        // Variant for the Zendesk Queue's Assign/Send IR flows, which need to make
+        // the real Zendesk API call themselves in between checking for a duplicate
+        // and actually committing the reassignment locally. Returns:
+        //   undefined -- no existing record, proceed as a brand-new assignment
+        //   null      -- abort (already assigned to this same agent, or declined)
+        //   <ticket>  -- an existing record the user confirmed reassigning; the
+        //                caller must still call reassignExistingTicket(...) itself
+        //                once its own Zendesk API call succeeds
+        function resolveDuplicateTicket(link, zendeskId, newAgent, actionVerb) {
+            const existing = findExistingTicketAssignment(link, zendeskId);
+            if (!existing) return undefined;
+
+            if (existing.agentId === newAgent.id) {
+                notify(`Ticket #${shortTicketRef(link)} is already assigned to ${newAgent.name}.`);
+                return null;
+            }
+
+            const confirmed = confirm(`Ticket #${shortTicketRef(link)} is already assigned to ${existing.agentName}. ${actionVerb} it to ${newAgent.name}?`);
+            return confirmed ? existing : null;
         }
 
         function toggleTheme() {
@@ -3449,9 +3553,13 @@
                 return notify("Select an agent with a Zendesk email set.");
             }
 
+            const zd = State.settings.zendesk;
+            const ticketLink = `https://${zd.subdomain}.zendesk.com/agent/tickets/${ticket.id}`;
+
+            const dup = resolveDuplicateTicket(ticketLink, ticket.id, agent, 'Reassign');
+            if (dup === null) return;
+
             try {
-                const zd = State.settings.zendesk;
-                const ticketLink = `https://${zd.subdomain}.zendesk.com/agent/tickets/${ticket.id}`;
                 const target = `https://${zd.subdomain}.zendesk.com/api/v2/tickets/${ticket.id}.json`;
                 const ccEmails = getSelectedCcs('assign-cc-group');
                 const ticketPayload = { assignee_email: agent.zendeskEmail };
@@ -3463,18 +3571,22 @@
                 }, resolveZendeskActingEmail());
                 if (!res.ok) throw new Error(`Zendesk returned ${res.status}`);
 
-                State.tickets.push({
-                    id: crypto.randomUUID(),
-                    agentId: agent.id,
-                    agentName: agent.name,
-                    link: ticketLink,
-                    date: getLocalDateString(),
-                    time: getFormattedTime(),
-                    zendeskId: ticket.id,
-                    source: 'zendesk'
-                });
-                agent.total++;
-                logActivity(agent.name, `<strong>#${ticket.id}</strong> was assigned to <strong>${agent.name}</strong>`);
+                if (dup) {
+                    reassignExistingTicket(dup, agent);
+                } else {
+                    State.tickets.push({
+                        id: crypto.randomUUID(),
+                        agentId: agent.id,
+                        agentName: agent.name,
+                        link: ticketLink,
+                        date: getLocalDateString(),
+                        time: getFormattedTime(),
+                        zendeskId: ticket.id,
+                        source: 'zendesk'
+                    });
+                    agent.total++;
+                    logActivity(agent.name, `<strong>#${ticket.id}</strong> was assigned to <strong>${agent.name}</strong>`);
+                }
 
                 if (!usingOther) {
                     const idx = State.agents.indexOf(agent);
@@ -3585,8 +3697,13 @@
                 return notify("Write or generate a response before sending.");
             }
 
+            const zd = State.settings.zendesk;
+            const ticketLink = `https://${zd.subdomain}.zendesk.com/agent/tickets/${ticket.id}`;
+
+            const dup = resolveDuplicateTicket(ticketLink, ticket.id, agent, 'Reassign');
+            if (dup === null) return;
+
             try {
-                const zd = State.settings.zendesk;
                 const target = `https://${zd.subdomain}.zendesk.com/api/v2/tickets/${ticket.id}.json`;
                 const ccEmails = getSelectedCcs('send-ir-cc-group');
                 const ticketPayload = { assignee_email: agent.zendeskEmail, comment: { body: replyText, public: true } };
@@ -3598,19 +3715,23 @@
                 }, resolveZendeskActingEmail());
                 if (!res.ok) throw new Error(`Zendesk returned ${res.status}`);
 
-                State.tickets.push({
-                    id: crypto.randomUUID(),
-                    agentId: agent.id,
-                    agentName: agent.name,
-                    link: `https://${zd.subdomain}.zendesk.com/agent/tickets/${ticket.id}`,
-                    date: getLocalDateString(),
-                    time: getFormattedTime(),
-                    zendeskId: ticket.id,
-                    source: 'zendesk',
-                    irSent: true
-                });
-                agent.total++;
-                logActivity(agent.name, `<strong>#${ticket.id}</strong> — initial response sent, assigned to <strong>${agent.name}</strong>`);
+                if (dup) {
+                    reassignExistingTicket(dup, agent, { irSent: true });
+                } else {
+                    State.tickets.push({
+                        id: crypto.randomUUID(),
+                        agentId: agent.id,
+                        agentName: agent.name,
+                        link: ticketLink,
+                        date: getLocalDateString(),
+                        time: getFormattedTime(),
+                        zendeskId: ticket.id,
+                        source: 'zendesk',
+                        irSent: true
+                    });
+                    agent.total++;
+                    logActivity(agent.name, `<strong>#${ticket.id}</strong> — initial response sent, assigned to <strong>${agent.name}</strong>`);
+                }
 
                 if (!usingOther) {
                     const idx = State.agents.indexOf(agent);

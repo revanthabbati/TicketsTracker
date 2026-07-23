@@ -85,6 +85,24 @@ async function fetchTicketSubjects(zendeskSettings, ticketIds) {
     return result;
 }
 
+// Same search the main app's Zendesk Queue "Unassigned" tab uses. Returns just
+// the count (Zendesk's search API includes it directly) -- no need to fetch
+// every result to know whether the queue is empty.
+async function fetchUnassignedCount(zendeskSettings) {
+    if (!zendeskSettings || !zendeskSettings.subdomain || !zendeskSettings.apiToken || !zendeskSettings.email || !zendeskSettings.proxyUrl) return null;
+
+    const authValue = btoa(`${zendeskSettings.email}/token:${zendeskSettings.apiToken}`);
+    const proxyUrl = zendeskSettings.proxyUrl.replace(/\/+$/, '');
+    const query = 'type:ticket status<solved assignee:none';
+    const target = `https://${zendeskSettings.subdomain}.zendesk.com/api/v2/search.json?query=${encodeURIComponent(query)}`;
+    const url = `${proxyUrl}?target=${encodeURIComponent(target)}`;
+
+    const res = await fetch(url, { headers: { Authorization: `Basic ${authValue}` } });
+    if (!res.ok) throw new Error(`Zendesk returned ${res.status}`);
+    const data = await res.json();
+    return typeof data.count === 'number' ? data.count : (data.results || []).length;
+}
+
 // Adds a `.subject` field to each ticket in place, using a persisted cache so
 // only genuinely-new Zendesk ticket ids ever need a live API call. Shared by
 // background.js and popup.js -- both load this file, one via importScripts,

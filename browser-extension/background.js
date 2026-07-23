@@ -1,12 +1,17 @@
 importScripts('firestore.js');
 
 const ALARM_NAME = 'pollTickets';
+const UNASSIGNED_ALARM_NAME = 'pollUnassigned';
+const UNASSIGNED_NOTIFICATION_ID = 'unassigned-alert';
+const TRACKER_APP_URL = 'https://revanthabbati.github.io/TicketsTracker/';
 const MAX_INDIVIDUAL_NOTIFICATIONS = 5;
 const MAX_KNOWN_IDS = 300;
 
 chrome.runtime.onInstalled.addListener((details) => {
     chrome.alarms.create(ALARM_NAME, { periodInMinutes: 1 });
+    chrome.alarms.create(UNASSIGNED_ALARM_NAME, { periodInMinutes: 5 });
     checkForNewAssignments();
+    checkUnassignedQueue();
     if (details.reason === 'install') {
         chrome.runtime.openOptionsPage();
     }
@@ -14,10 +19,12 @@ chrome.runtime.onInstalled.addListener((details) => {
 
 chrome.runtime.onStartup.addListener(() => {
     checkForNewAssignments();
+    checkUnassignedQueue();
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
     if (alarm.name === ALARM_NAME) checkForNewAssignments();
+    if (alarm.name === UNASSIGNED_ALARM_NAME) checkUnassignedQueue();
 });
 
 chrome.runtime.onMessage.addListener((message) => {
@@ -26,9 +33,16 @@ chrome.runtime.onMessage.addListener((message) => {
 
 // Clicking a per-ticket notification opens the ticket AND marks it read --
 // you clearly just looked at it. Summary notifications (>5 new at once) have
-// no single ticket to open or mark, so just dismiss.
+// no single ticket to open or mark, so just dismiss. The unassigned-queue
+// alert opens the tracker app itself (its Zendesk Queue tab), since it's not
+// about any one ticket.
 chrome.notifications.onClicked.addListener(async (notificationId) => {
     chrome.notifications.clear(notificationId);
+
+    if (notificationId === UNASSIGNED_NOTIFICATION_ID) {
+        chrome.tabs.create({ url: TRACKER_APP_URL });
+        return;
+    }
     if (!notificationId.startsWith('ticket-')) return;
 
     const ticketId = notificationId.slice('ticket-'.length);
@@ -37,6 +51,31 @@ chrome.notifications.onClicked.addListener(async (notificationId) => {
     if (ticket) chrome.tabs.create({ url: ticket.link });
     await markTicketsRead([ticketId]);
 });
+
+// Independent of per-agent identity -- an empty Zendesk Queue matters to
+// whoever's watching, not just one person, so this runs regardless of whether
+// the extension's own agent identity has been configured yet.
+async function checkUnassignedQueue() {
+    try {
+        const { settings } = await fetchState();
+        const zendesk = settings && settings.zendesk;
+        if (!zendesk) return;
+
+        const count = await fetchUnassignedCount(zendesk);
+        if (count > 0) {
+            chrome.notifications.create(UNASSIGNED_NOTIFICATION_ID, {
+                type: 'basic',
+                iconUrl: 'icons/notify-red.png',
+                title: 'Unassigned tickets waiting',
+                message: `${count} ticket${count === 1 ? '' : 's'} in the Zendesk queue ${count === 1 ? 'has' : 'have'} no assignee yet.`
+            });
+        } else {
+            chrome.notifications.clear(UNASSIGNED_NOTIFICATION_ID);
+        }
+    } catch (err) {
+        console.error('Tracker Notifier: unassigned queue check failed', err);
+    }
+}
 
 async function checkForNewAssignments() {
     try {
