@@ -31,6 +31,32 @@ chrome.runtime.onMessage.addListener((message) => {
     if (message && message.type === 'pollNow') checkForNewAssignments();
 });
 
+// MV3 service workers have no Audio API of their own -- play sounds via a
+// hidden offscreen document instead (created on demand, left open between
+// alerts since there's no meaningful cost to that).
+async function ensureOffscreenDocument() {
+    if (await chrome.offscreen.hasDocument()) return;
+    await chrome.offscreen.createDocument({
+        url: 'offscreen.html',
+        reasons: ['AUDIO_PLAYBACK'],
+        justification: 'Play a short alert sound when a ticket is assigned or the queue has unassigned tickets.'
+    });
+}
+
+async function maybePlayAlertSound() {
+    try {
+        const { soundEnabled, soundChoice } = await chrome.storage.local.get(['soundEnabled', 'soundChoice']);
+        if (soundEnabled === false) return; // enabled by default until explicitly turned off
+        const sound = soundChoice || 'chime';
+        if (sound === 'none') return;
+
+        await ensureOffscreenDocument();
+        chrome.runtime.sendMessage({ type: 'playSound', sound });
+    } catch (err) {
+        console.error('Tracker Notifier: failed to play alert sound', err);
+    }
+}
+
 // Clicking a per-ticket notification opens the ticket AND marks it read --
 // you clearly just looked at it. Summary notifications (>5 new at once) have
 // no single ticket to open or mark, so just dismiss. The unassigned-queue
@@ -61,7 +87,10 @@ async function checkUnassignedQueue() {
         const zendesk = settings && settings.zendesk;
         if (!zendesk) return;
 
-        const count = await fetchUnassignedCount(zendesk);
+        const unassignedTickets = await fetchUnassignedTickets(zendesk);
+        await chrome.storage.local.set({ unassignedTickets, unassignedSubdomain: zendesk.subdomain });
+
+        const count = unassignedTickets.length;
         if (count > 0) {
             chrome.notifications.create(UNASSIGNED_NOTIFICATION_ID, {
                 type: 'basic',
@@ -69,6 +98,7 @@ async function checkUnassignedQueue() {
                 title: 'Unassigned tickets waiting',
                 message: `${count} ticket${count === 1 ? '' : 's'} in the Zendesk queue ${count === 1 ? 'has' : 'have'} no assignee yet.`
             });
+            maybePlayAlertSound();
         } else {
             chrome.notifications.clear(UNASSIGNED_NOTIFICATION_ID);
         }
@@ -127,6 +157,7 @@ function notifyNewAssignments(newOnes) {
             title: 'New tickets assigned',
             message: `${newOnes.length} new tickets assigned to you.`
         });
+        maybePlayAlertSound();
         return;
     }
 
@@ -141,4 +172,5 @@ function notifyNewAssignments(newOnes) {
             message: `${subjectLine}\n${statusLine}`
         });
     }
+    maybePlayAlertSound();
 }

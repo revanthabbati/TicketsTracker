@@ -1,8 +1,14 @@
 const elSelect = document.getElementById('agent-select');
 const elStatus = document.getElementById('status');
+const elSoundEnabled = document.getElementById('sound-enabled');
+const elSoundSelect = document.getElementById('sound-select');
 
 async function init() {
-    const { agentId: savedAgentId } = await chrome.storage.local.get('agentId');
+    const { agentId: savedAgentId, soundEnabled, soundChoice } = await chrome.storage.local.get(['agentId', 'soundEnabled', 'soundChoice']);
+
+    elSoundEnabled.checked = soundEnabled !== false; // enabled by default
+    elSoundSelect.value = soundChoice || 'chime';
+    elSoundSelect.disabled = !elSoundEnabled.checked;
 
     try {
         const { agents } = await fetchState();
@@ -45,8 +51,27 @@ document.getElementById('btn-save').addEventListener('click', async () => {
 
     chrome.runtime.sendMessage({ type: 'pollNow' });
 
+    await chrome.storage.local.set({ soundEnabled: elSoundEnabled.checked, soundChoice: elSoundSelect.value });
+
     elStatus.classList.remove('error');
     elStatus.textContent = `Saved — you're set up as ${newAgentName}.`;
+});
+
+elSoundEnabled.addEventListener('change', () => {
+    elSoundSelect.disabled = !elSoundEnabled.checked;
+});
+
+document.getElementById('btn-test-sound').addEventListener('click', async () => {
+    await chrome.offscreen.hasDocument().then(async (has) => {
+        if (!has) {
+            await chrome.offscreen.createDocument({
+                url: 'offscreen.html',
+                reasons: ['AUDIO_PLAYBACK'],
+                justification: 'Preview the selected alert sound.'
+            });
+        }
+    });
+    chrome.runtime.sendMessage({ type: 'playSound', sound: elSoundSelect.value });
 });
 
 init();

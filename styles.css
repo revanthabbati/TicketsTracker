@@ -66,13 +66,13 @@ body { background-color: var(--bg-base); color: var(--text-main); height: 100vh;
 .page-title h1 { font-size: 1.85rem; font-weight: 700; margin-bottom: 0.35rem; letter-spacing: -0.02em;}
 .page-title p { color: var(--text-muted); font-size: 0.95rem; }
 .stat-cards { display: flex; gap: 1rem; flex-wrap: wrap; }
-.stat-card { border-radius: var(--radius-md); padding: 1rem 1.25rem; min-width: 140px; flex: 1; color: white; display: flex; flex-direction: column; box-shadow: var(--shadow-drop); }
+.stat-card { border-radius: var(--radius-md); padding: 1rem 1.25rem; min-width: 140px; flex: 1; color: white; display: flex; flex-direction: column; box-shadow: var(--shadow-drop); overflow: hidden; }
 .stat-card.blue { background: var(--grad-blue); }
 .stat-card.pink { background: var(--grad-pink); }
 .stat-card.purple { background: var(--grad-brand); }
 .stat-card.green { background: var(--grad-green); }
 .stat-card.orange { background: var(--grad-orange); }
-.stat-label { font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; opacity: 0.9; margin-bottom: 0.5rem; white-space: nowrap;}
+.stat-label { font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; opacity: 0.9; margin-bottom: 0.5rem; white-space: normal; overflow-wrap: break-word;}
 .stat-value { font-size: 1.8rem; font-weight: 700; }
 
 /* --- DASHBOARD GRID & PANELS --- */

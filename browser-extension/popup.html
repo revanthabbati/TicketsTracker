@@ -4,16 +4,22 @@
 <meta charset="utf-8">
 <title>Tracker Notifier</title>
 <style>
-    body { width: 360px; margin: 0; font-family: -apple-system, Segoe UI, Roboto, sans-serif; background: #12121c; color: #e2e8f0; }
+    body { width: 380px; margin: 0; font-family: -apple-system, Segoe UI, Roboto, sans-serif; background: #12121c; color: #e2e8f0; }
     .header { padding: 12px 14px; border-bottom: 1px solid rgba(255,255,255,0.08); }
     .header h1 { font-size: 0.95rem; margin: 0 0 2px; font-weight: 700; }
     .header p { font-size: 0.78rem; margin: 0; color: #94a3b8; }
     .header a { color: #a855f7; text-decoration: none; }
+    .tabs { display: flex; border-bottom: 1px solid rgba(255,255,255,0.08); }
+    .tab-btn { flex: 1; background: transparent; border: none; color: #94a3b8; padding: 9px 6px; font-size: 0.8rem; cursor: pointer; border-bottom: 2px solid transparent; display: flex; align-items: center; justify-content: center; gap: 6px; }
+    .tab-btn.active { color: #e2e8f0; border-bottom-color: #6366f1; font-weight: 600; }
+    .tab-btn:hover { color: #e2e8f0; }
+    .tab-count { background: rgba(255,255,255,0.1); color: #e2e8f0; border-radius: 10px; padding: 0 6px; font-size: 0.68rem; min-width: 16px; text-align: center; }
+    .tab-count.red { background: #f43f5e; }
     .actions { display: flex; justify-content: space-between; align-items: center; padding: 8px 14px; gap: 8px; }
     .actions .btn-group { display: flex; gap: 6px; }
     .actions button { background: transparent; border: 1px solid rgba(255,255,255,0.15); color: #e2e8f0; border-radius: 6px; padding: 4px 10px; font-size: 0.75rem; cursor: pointer; white-space: nowrap; }
     .actions button:hover { background: rgba(255,255,255,0.06); }
-    #list { max-height: 400px; overflow-y: auto; }
+    #list, #unassigned-list { max-height: 380px; overflow-y: auto; }
     .row { display: flex; flex-direction: column; gap: 3px; padding: 8px 14px; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 0.82rem; }
     .row.read { opacity: 0.45; }
     .row-top { display: flex; align-items: center; gap: 8px; }
@@ -26,6 +32,10 @@
     .row .subject { color: #94a3b8; font-size: 0.75rem; padding-left: 17px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .mark-btn { flex-shrink: 0; background: transparent; border: 1px solid rgba(255,255,255,0.15); color: #94a3b8; border-radius: 5px; padding: 2px 7px; font-size: 0.68rem; cursor: pointer; }
     .mark-btn:hover { background: rgba(255,255,255,0.08); color: #e2e8f0; }
+    .priority-tag { flex-shrink: 0; font-size: 0.65rem; text-transform: uppercase; font-weight: 700; padding: 1px 6px; border-radius: 4px; }
+    .priority-tag.urgent, .priority-tag.high { background: rgba(244,63,94,0.15); color: #f43f5e; }
+    .priority-tag.normal { background: rgba(59,130,246,0.15); color: #3b82f6; }
+    .priority-tag.low { background: rgba(148,163,184,0.15); color: #94a3b8; }
     .empty, .setup { padding: 24px 14px; text-align: center; color: #94a3b8; font-size: 0.82rem; }
     .setup button { margin-top: 10px; background: #6366f1; color: white; border: none; border-radius: 6px; padding: 8px 14px; font-size: 0.82rem; cursor: pointer; }
     .setup button:hover { background: #4f46e5; }
@@ -42,14 +52,29 @@
         <button id="btn-setup">Set up your name</button>
     </div>
     <div id="main" class="hidden">
-        <div class="actions">
-            <span id="summary" style="font-size:0.78rem; color:#94a3b8;"></span>
-            <div class="btn-group">
-                <button id="btn-mark-all-read">Mark all read</button>
-                <button id="btn-refresh">Refresh</button>
-            </div>
+        <div class="tabs">
+            <button class="tab-btn active" id="tab-btn-mine" data-tab="mine">My Tickets <span class="tab-count hidden" id="mine-count">0</span></button>
+            <button class="tab-btn" id="tab-btn-unassigned" data-tab="unassigned">Unassigned <span class="tab-count hidden" id="unassigned-count">0</span></button>
         </div>
-        <div id="list"></div>
+
+        <div id="panel-mine">
+            <div class="actions">
+                <span id="summary" style="font-size:0.78rem; color:#94a3b8;"></span>
+                <div class="btn-group">
+                    <button id="btn-mark-all-read">Mark all read</button>
+                    <button id="btn-refresh">Refresh</button>
+                </div>
+            </div>
+            <div id="list"></div>
+        </div>
+
+        <div id="panel-unassigned" class="hidden">
+            <div class="actions">
+                <span id="unassigned-summary" style="font-size:0.78rem; color:#94a3b8;"></span>
+                <button id="btn-refresh-unassigned">Refresh</button>
+            </div>
+            <div id="unassigned-list"></div>
+        </div>
     </div>
     <script src="firestore.js"></script>
     <script src="popup.js"></script>

@@ -913,6 +913,13 @@
                 <span class="input-hint">Only agents with a Zendesk Agent Email set (Manage Agents) are eligible.</span>
             </div>
             <div class="input-group">
+                <label>Zendesk Group (Optional)</label>
+                <select id="assign-zendesk-group" class="input-control">
+                    <option value="">-- Keep current group --</option>
+                </select>
+                <span class="input-hint">Moves the ticket into this group in Zendesk alongside the assignee, e.g. Support, Customer Success, or Zendesk Alerts.</span>
+            </div>
+            <div class="input-group">
                 <label>CC</label>
                 <div class="checkbox-group" id="assign-cc-group" style="flex-direction: row; flex-wrap: wrap; gap: 0.5rem 1.25rem;">
                     <label class="perm-check"><input type="checkbox" class="zendesk-cc-checkbox" value="support@dispatchtrack.com"> Support</label>
@@ -949,6 +956,13 @@
                 <select id="send-ir-agent" class="input-control hidden" style="margin-bottom: 0.75rem;"></select>
                 <button type="button" class="btn btn-outline" id="btn-send-ir-other-agents" style="width: 100%;" onclick="window.toggleSendIrOtherAgents()">Other Agents</button>
                 <span class="input-hint">Only agents with a Zendesk Agent Email set (Manage Agents) are eligible. Drafting starts automatically.</span>
+            </div>
+            <div class="input-group">
+                <label>Zendesk Group (Optional)</label>
+                <select id="send-ir-group" class="input-control">
+                    <option value="">-- Keep current group --</option>
+                </select>
+                <span class="input-hint">Moves the ticket into this group in Zendesk alongside the assignee, e.g. Support, Customer Success, or Zendesk Alerts.</span>
             </div>
             <div class="input-group">
                 <label>Draft Response <span id="send-ir-status" style="text-transform: none; font-weight: 500; color: var(--text-muted);"></span></label>
@@ -1174,6 +1188,11 @@
         let zendeskRequesterMap = {};
         let zendeskSuspendedCache = [];
         let zendeskSelectedIds = new Set();
+        // Guards confirmAssignZendeskTicket/confirmSendIr against a rapid double-click:
+        // both are async with a real network call between the duplicate-ticket check
+        // and actually pushing the record, so a second click before the first resolves
+        // could otherwise sail past the check and create a genuine duplicate.
+        const zendeskAssignInFlight = new Set();
 
         /** --- DOM BINDINGS --- **/
         const UI = {
@@ -1362,11 +1381,13 @@
             assignZendeskSubject: document.getElementById('assign-zendesk-subject'),
             assignZendeskId: document.getElementById('assign-zendesk-id'),
             assignZendeskAgentSelect: document.getElementById('assign-zendesk-agent'),
+            assignZendeskGroupSelect: document.getElementById('assign-zendesk-group'),
 
             modalSendIr: document.getElementById('modal-send-ir'),
             sendIrSubject: document.getElementById('send-ir-subject'),
             sendIrId: document.getElementById('send-ir-id'),
             sendIrAgentSelect: document.getElementById('send-ir-agent'),
+            sendIrGroupSelect: document.getElementById('send-ir-group'),
             sendIrDraft: document.getElementById('send-ir-draft'),
             sendIrStatus: document.getElementById('send-ir-status'),
 
@@ -1457,7 +1478,7 @@
         /** --- BOOT SEQUENCE --- **/
         function bootApp() {
             document.documentElement.setAttribute('data-theme', localStorage.getItem('ent_v10_theme') || 'dark');
-            
+
             const today = getLocalDateString();
             document.getElementById('date-badge-1').innerText = today;
 
@@ -3054,6 +3075,39 @@
             }
         }
 
+        // Fetched once and cached -- Zendesk groups (Support, Customer Success,
+        // Zendesk Alerts, etc.) don't change within a session, so there's no need
+        // to re-fetch every time an assign modal opens.
+        let zendeskGroupsCache = null;
+
+        async function ensureZendeskGroupsLoaded() {
+            if (zendeskGroupsCache) return zendeskGroupsCache;
+            const zd = State.settings.zendesk;
+            if (!zd || !zd.subdomain) { zendeskGroupsCache = []; return zendeskGroupsCache; }
+
+            try {
+                const target = `https://${zd.subdomain}.zendesk.com/api/v2/groups.json`;
+                const res = await zendeskFetch(target, { method: 'GET' });
+                if (!res.ok) throw new Error(`Zendesk returned ${res.status}`);
+                const data = await res.json();
+                zendeskGroupsCache = (data.groups || []).sort((a, b) => a.name.localeCompare(b.name));
+            } catch (err) {
+                console.error(err);
+                zendeskGroupsCache = [];
+            }
+            return zendeskGroupsCache;
+        }
+
+        async function populateGroupSelect(selectEl) {
+            const groups = await ensureZendeskGroupsLoaded();
+            const current = selectEl.value;
+            selectEl.innerHTML = '<option value="">-- Keep current group --</option>';
+            groups.forEach(g => {
+                selectEl.insertAdjacentHTML('beforeend', `<option value="${g.id}">${escapeHtml(g.name)}</option>`);
+            });
+            selectEl.value = current || '';
+        }
+
         function renderNextAgentBox(prefix, agent) {
             const nameEl = document.getElementById(`${prefix}-next-name`);
             const avatarEl = document.getElementById(`${prefix}-next-avatar`);
@@ -3539,73 +3593,82 @@
             document.getElementById('btn-assign-zendesk-other-agents').innerText = 'Other Agents';
 
             resetCcCheckboxes('assign-cc-group');
+            populateGroupSelect(UI.assignZendeskGroupSelect);
             UI.modalAssignZendesk.classList.add('active');
         };
 
         window.confirmAssignZendeskTicket = async function(action) {
             const ticketId = Number(UI.assignZendeskId.value);
-            const usingOther = isUsingOtherAgents('assign-zendesk');
-            const agentId = getEffectiveZendeskAgentId('assign-zendesk');
-            const ticket = zendeskQueueCache.find(t => t.id === ticketId);
-            const agent = State.agents.find(a => a.id === agentId);
-
-            if (!ticket || !agent || !agent.zendeskEmail) {
-                return notify("Select an agent with a Zendesk email set.");
-            }
-
-            const zd = State.settings.zendesk;
-            const ticketLink = `https://${zd.subdomain}.zendesk.com/agent/tickets/${ticket.id}`;
-
-            const dup = resolveDuplicateTicket(ticketLink, ticket.id, agent, 'Reassign');
-            if (dup === null) return;
+            if (zendeskAssignInFlight.has(ticketId)) return;
+            zendeskAssignInFlight.add(ticketId);
 
             try {
-                const target = `https://${zd.subdomain}.zendesk.com/api/v2/tickets/${ticket.id}.json`;
-                const ccEmails = getSelectedCcs('assign-cc-group');
-                const ticketPayload = { assignee_email: agent.zendeskEmail };
-                if (ccEmails.length > 0) ticketPayload.email_ccs = buildEmailCcs(ccEmails);
-                const res = await zendeskFetch(target, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ ticket: ticketPayload })
-                }, resolveZendeskActingEmail());
-                if (!res.ok) throw new Error(`Zendesk returned ${res.status}`);
+                const usingOther = isUsingOtherAgents('assign-zendesk');
+                const agentId = getEffectiveZendeskAgentId('assign-zendesk');
+                const ticket = zendeskQueueCache.find(t => t.id === ticketId);
+                const agent = State.agents.find(a => a.id === agentId);
 
-                if (dup) {
-                    reassignExistingTicket(dup, agent);
-                } else {
-                    State.tickets.push({
-                        id: crypto.randomUUID(),
-                        agentId: agent.id,
-                        agentName: agent.name,
-                        link: ticketLink,
-                        date: getLocalDateString(),
-                        time: getFormattedTime(),
-                        zendeskId: ticket.id,
-                        source: 'zendesk'
-                    });
-                    agent.total++;
-                    logActivity(agent.name, `<strong>#${ticket.id}</strong> was assigned to <strong>${agent.name}</strong>`);
+                if (!ticket || !agent || !agent.zendeskEmail) {
+                    return notify("Select an agent with a Zendesk email set.");
                 }
 
-                if (!usingOther) {
-                    const idx = State.agents.indexOf(agent);
-                    State.queueIdx = getNextAvailableAgentIndex(idx + 1);
+                const zd = State.settings.zendesk;
+                const ticketLink = `https://${zd.subdomain}.zendesk.com/agent/tickets/${ticket.id}`;
+
+                const dup = resolveDuplicateTicket(ticketLink, ticket.id, agent, 'Reassign');
+                if (dup === null) return;
+
+                try {
+                    const target = `https://${zd.subdomain}.zendesk.com/api/v2/tickets/${ticket.id}.json`;
+                    const ccEmails = getSelectedCcs('assign-cc-group');
+                    const ticketPayload = { assignee_email: agent.zendeskEmail };
+                    if (ccEmails.length > 0) ticketPayload.email_ccs = buildEmailCcs(ccEmails);
+                    if (UI.assignZendeskGroupSelect.value) ticketPayload.group_id = Number(UI.assignZendeskGroupSelect.value);
+                    const res = await zendeskFetch(target, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ ticket: ticketPayload })
+                    }, resolveZendeskActingEmail());
+                    if (!res.ok) throw new Error(`Zendesk returned ${res.status}`);
+
+                    if (dup) {
+                        reassignExistingTicket(dup, agent);
+                    } else {
+                        State.tickets.push({
+                            id: crypto.randomUUID(),
+                            agentId: agent.id,
+                            agentName: agent.name,
+                            link: ticketLink,
+                            date: getLocalDateString(),
+                            time: getFormattedTime(),
+                            zendeskId: ticket.id,
+                            source: 'zendesk'
+                        });
+                        agent.total++;
+                        logActivity(agent.name, `<strong>#${ticket.id}</strong> was assigned to <strong>${agent.name}</strong>`);
+                    }
+
+                    if (!usingOther) {
+                        const idx = State.agents.indexOf(agent);
+                        State.queueIdx = getNextAvailableAgentIndex(idx + 1);
+                    }
+
+                    State.commit(['tickets', 'agents', 'activities', 'queueIdx']);
+                    syncUI();
+
+                    zendeskQueueCache = zendeskQueueCache.filter(t => t.id !== ticket.id);
+                    renderZendeskQueueTable();
+
+                    window.closeModals();
+                    if (!handleSlackRedirect(action, agent)) {
+                        notify(`Assigned Zendesk ticket #${ticket.id} to ${agent.name}`);
+                    }
+                } catch (err) {
+                    console.error(err);
+                    notify("Failed to assign in Zendesk — check the console.");
                 }
-
-                State.commit(['tickets', 'agents', 'activities', 'queueIdx']);
-                syncUI();
-
-                zendeskQueueCache = zendeskQueueCache.filter(t => t.id !== ticket.id);
-                renderZendeskQueueTable();
-
-                window.closeModals();
-                if (!handleSlackRedirect(action, agent)) {
-                    notify(`Assigned Zendesk ticket #${ticket.id} to ${agent.name}`);
-                }
-            } catch (err) {
-                console.error(err);
-                notify("Failed to assign in Zendesk — check the console.");
+            } finally {
+                zendeskAssignInFlight.delete(ticketId);
             }
         };
 
@@ -3628,6 +3691,7 @@
             document.getElementById('btn-send-ir-other-agents').innerText = 'Other Agents';
 
             resetCcCheckboxes('send-ir-cc-group');
+            populateGroupSelect(UI.sendIrGroupSelect);
             UI.modalSendIr.classList.add('active');
 
             generateIrDraft();
@@ -3684,71 +3748,79 @@
 
         window.confirmSendIr = async function() {
             const ticketId = Number(UI.sendIrId.value);
-            const usingOther = isUsingOtherAgents('send-ir');
-            const agentId = getEffectiveZendeskAgentId('send-ir');
-            const ticket = zendeskQueueCache.find(t => t.id === ticketId);
-            const agent = State.agents.find(a => a.id === agentId);
-            const replyText = UI.sendIrDraft.value.trim();
-
-            if (!ticket || !agent || !agent.zendeskEmail) {
-                return notify("Select an agent with a Zendesk email set.");
-            }
-            if (!replyText) {
-                return notify("Write or generate a response before sending.");
-            }
-
-            const zd = State.settings.zendesk;
-            const ticketLink = `https://${zd.subdomain}.zendesk.com/agent/tickets/${ticket.id}`;
-
-            const dup = resolveDuplicateTicket(ticketLink, ticket.id, agent, 'Reassign');
-            if (dup === null) return;
+            if (zendeskAssignInFlight.has(ticketId)) return;
+            zendeskAssignInFlight.add(ticketId);
 
             try {
-                const target = `https://${zd.subdomain}.zendesk.com/api/v2/tickets/${ticket.id}.json`;
-                const ccEmails = getSelectedCcs('send-ir-cc-group');
-                const ticketPayload = { assignee_email: agent.zendeskEmail, comment: { body: replyText, public: true } };
-                if (ccEmails.length > 0) ticketPayload.email_ccs = buildEmailCcs(ccEmails);
-                const res = await zendeskFetch(target, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ ticket: ticketPayload })
-                }, resolveZendeskActingEmail());
-                if (!res.ok) throw new Error(`Zendesk returned ${res.status}`);
+                const usingOther = isUsingOtherAgents('send-ir');
+                const agentId = getEffectiveZendeskAgentId('send-ir');
+                const ticket = zendeskQueueCache.find(t => t.id === ticketId);
+                const agent = State.agents.find(a => a.id === agentId);
+                const replyText = UI.sendIrDraft.value.trim();
 
-                if (dup) {
-                    reassignExistingTicket(dup, agent, { irSent: true });
-                } else {
-                    State.tickets.push({
-                        id: crypto.randomUUID(),
-                        agentId: agent.id,
-                        agentName: agent.name,
-                        link: ticketLink,
-                        date: getLocalDateString(),
-                        time: getFormattedTime(),
-                        zendeskId: ticket.id,
-                        source: 'zendesk',
-                        irSent: true
-                    });
-                    agent.total++;
-                    logActivity(agent.name, `<strong>#${ticket.id}</strong> — initial response sent, assigned to <strong>${agent.name}</strong>`);
+                if (!ticket || !agent || !agent.zendeskEmail) {
+                    return notify("Select an agent with a Zendesk email set.");
+                }
+                if (!replyText) {
+                    return notify("Write or generate a response before sending.");
                 }
 
-                if (!usingOther) {
-                    const idx = State.agents.indexOf(agent);
-                    State.queueIdx = getNextAvailableAgentIndex(idx + 1);
+                const zd = State.settings.zendesk;
+                const ticketLink = `https://${zd.subdomain}.zendesk.com/agent/tickets/${ticket.id}`;
+
+                const dup = resolveDuplicateTicket(ticketLink, ticket.id, agent, 'Reassign');
+                if (dup === null) return;
+
+                try {
+                    const target = `https://${zd.subdomain}.zendesk.com/api/v2/tickets/${ticket.id}.json`;
+                    const ccEmails = getSelectedCcs('send-ir-cc-group');
+                    const ticketPayload = { assignee_email: agent.zendeskEmail, comment: { body: replyText, public: true } };
+                    if (ccEmails.length > 0) ticketPayload.email_ccs = buildEmailCcs(ccEmails);
+                    if (UI.sendIrGroupSelect.value) ticketPayload.group_id = Number(UI.sendIrGroupSelect.value);
+                    const res = await zendeskFetch(target, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ ticket: ticketPayload })
+                    }, resolveZendeskActingEmail());
+                    if (!res.ok) throw new Error(`Zendesk returned ${res.status}`);
+
+                    if (dup) {
+                        reassignExistingTicket(dup, agent, { irSent: true });
+                    } else {
+                        State.tickets.push({
+                            id: crypto.randomUUID(),
+                            agentId: agent.id,
+                            agentName: agent.name,
+                            link: ticketLink,
+                            date: getLocalDateString(),
+                            time: getFormattedTime(),
+                            zendeskId: ticket.id,
+                            source: 'zendesk',
+                            irSent: true
+                        });
+                        agent.total++;
+                        logActivity(agent.name, `<strong>#${ticket.id}</strong> — initial response sent, assigned to <strong>${agent.name}</strong>`);
+                    }
+
+                    if (!usingOther) {
+                        const idx = State.agents.indexOf(agent);
+                        State.queueIdx = getNextAvailableAgentIndex(idx + 1);
+                    }
+
+                    State.commit(['tickets', 'agents', 'activities', 'queueIdx']);
+                    syncUI();
+
+                    zendeskQueueCache = zendeskQueueCache.filter(t => t.id !== ticket.id);
+                    renderZendeskQueueTable();
+
+                    window.closeModals();
+                    notify(`Initial response sent and ticket #${ticket.id} assigned to ${agent.name}`);
+                } catch (err) {
+                    console.error(err);
+                    notify("Failed to send the initial response — check the console.");
                 }
-
-                State.commit(['tickets', 'agents', 'activities', 'queueIdx']);
-                syncUI();
-
-                zendeskQueueCache = zendeskQueueCache.filter(t => t.id !== ticket.id);
-                renderZendeskQueueTable();
-
-                window.closeModals();
-                notify(`Initial response sent and ticket #${ticket.id} assigned to ${agent.name}`);
-            } catch (err) {
-                console.error(err);
-                notify("Failed to send the initial response — check the console.");
+            } finally {
+                zendeskAssignInFlight.delete(ticketId);
             }
         };
 

@@ -85,22 +85,23 @@ async function fetchTicketSubjects(zendeskSettings, ticketIds) {
     return result;
 }
 
-// Same search the main app's Zendesk Queue "Unassigned" tab uses. Returns just
-// the count (Zendesk's search API includes it directly) -- no need to fetch
-// every result to know whether the queue is empty.
-async function fetchUnassignedCount(zendeskSettings) {
-    if (!zendeskSettings || !zendeskSettings.subdomain || !zendeskSettings.apiToken || !zendeskSettings.email || !zendeskSettings.proxyUrl) return null;
+// Same search the main app's Zendesk Queue "Unassigned" tab uses, returning
+// the actual tickets (first page, same as the main app -- no pagination
+// handling there either, since a backlog past ~100 is its own problem to
+// notice). Callers needing just a count use the returned array's length.
+async function fetchUnassignedTickets(zendeskSettings) {
+    if (!zendeskSettings || !zendeskSettings.subdomain || !zendeskSettings.apiToken || !zendeskSettings.email || !zendeskSettings.proxyUrl) return [];
 
     const authValue = btoa(`${zendeskSettings.email}/token:${zendeskSettings.apiToken}`);
     const proxyUrl = zendeskSettings.proxyUrl.replace(/\/+$/, '');
     const query = 'type:ticket status<solved assignee:none';
-    const target = `https://${zendeskSettings.subdomain}.zendesk.com/api/v2/search.json?query=${encodeURIComponent(query)}`;
+    const target = `https://${zendeskSettings.subdomain}.zendesk.com/api/v2/search.json?query=${encodeURIComponent(query)}&sort_by=created_at&sort_order=asc`;
     const url = `${proxyUrl}?target=${encodeURIComponent(target)}`;
 
     const res = await fetch(url, { headers: { Authorization: `Basic ${authValue}` } });
     if (!res.ok) throw new Error(`Zendesk returned ${res.status}`);
     const data = await res.json();
-    return typeof data.count === 'number' ? data.count : (data.results || []).length;
+    return data.results || [];
 }
 
 // Adds a `.subject` field to each ticket in place, using a persisted cache so
