@@ -120,6 +120,13 @@ body { background-color: var(--bg-base); color: var(--text-main); height: 100vh;
 .btn-icon:hover:not(:disabled) { color: var(--text-main); background: rgba(255,255,255,0.1); }
 .btn-icon.danger:hover:not(:disabled) { color: #f43f5e; background: rgba(244, 63, 94, 0.1); }
 
+/* --- DRAG-TO-REORDER (Agents roster) --- */
+.drag-handle { cursor: grab; color: var(--text-muted); display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; touch-action: none; }
+.drag-handle:active { cursor: grabbing; }
+tr[draggable="true"].dragging { opacity: 0.4; }
+tr[draggable="true"].drag-over-top { box-shadow: inset 0 2px 0 0 var(--brand-blue); }
+tr[draggable="true"].drag-over-bottom { box-shadow: inset 0 -2px 0 0 var(--brand-blue); }
+
 /* --- CHECKBOX / PERMISSIONS --- */
 .checkbox-group { display: flex; flex-direction: column; gap: 0.75rem; margin-top: 0.5rem; }
 .perm-check { display: flex; align-items: center; gap: 0.5rem; color: var(--text-main); font-weight: 500; font-size: 0.9rem; cursor: pointer; }

@@ -1536,6 +1536,10 @@
             UI.btnChangePassword.addEventListener('click', window.openChangePasswordModal);
 
             UI.tableAgents.addEventListener('change', handleAgentToggle);
+            UI.tableAgents.addEventListener('dragstart', handleAgentDragStart);
+            UI.tableAgents.addEventListener('dragover', handleAgentDragOver);
+            UI.tableAgents.addEventListener('drop', handleAgentDrop);
+            UI.tableAgents.addEventListener('dragend', handleAgentDragEnd);
 
             UI.formEditAgent.addEventListener('submit', submitEditAgent);
             UI.formEditUser.addEventListener('submit', submitEditUser);
@@ -2763,9 +2767,14 @@
                     </td>`;
                 }
 
+                const dragHandle = canManageAgents
+                    ? `<span class="drag-handle" title="Drag to reorder"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="9" cy="6" r="1.2" fill="currentColor" stroke="none"></circle><circle cx="15" cy="6" r="1.2" fill="currentColor" stroke="none"></circle><circle cx="9" cy="12" r="1.2" fill="currentColor" stroke="none"></circle><circle cx="15" cy="12" r="1.2" fill="currentColor" stroke="none"></circle><circle cx="9" cy="18" r="1.2" fill="currentColor" stroke="none"></circle><circle cx="15" cy="18" r="1.2" fill="currentColor" stroke="none"></circle></svg></span>`
+                    : '';
+
                 UI.tableAgents.insertAdjacentHTML('beforeend', `
-                    <tr>
+                    <tr draggable="${canManageAgents}" data-agent-id="${a.id}">
                         <td style="display:flex; align-items:center; gap: 0.75rem;">
+                            ${dragHandle}
                             <img src="${avatar}" style="width:28px; height:28px; border-radius:50%; border: 1px solid var(--border-light); object-fit:cover;">
                             <div>
                                 <div style="font-weight: 600; opacity: ${a.isAvailable ? '1' : '0.5'};">${a.name}</div>
@@ -2783,6 +2792,81 @@
                     </tr>
                 `);
             });
+        }
+
+        let draggedAgentId = null;
+
+        function clearAgentDragIndicators() {
+            UI.tableAgents.querySelectorAll('.dragging').forEach(r => r.classList.remove('dragging'));
+            UI.tableAgents.querySelectorAll('.drag-over-top, .drag-over-bottom').forEach(r => r.classList.remove('drag-over-top', 'drag-over-bottom'));
+        }
+
+        function handleAgentDragStart(e) {
+            const row = e.target.closest('tr[data-agent-id]');
+            if (!row) return;
+            draggedAgentId = row.dataset.agentId;
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/plain', draggedAgentId);
+            row.classList.add('dragging');
+        }
+
+        function handleAgentDragOver(e) {
+            if (!draggedAgentId) return;
+            const row = e.target.closest('tr[data-agent-id]');
+            if (!row || row.dataset.agentId === draggedAgentId) return;
+            e.preventDefault();
+
+            const rect = row.getBoundingClientRect();
+            const insertBefore = e.clientY < rect.top + rect.height / 2;
+            UI.tableAgents.querySelectorAll('.drag-over-top, .drag-over-bottom').forEach(r => r.classList.remove('drag-over-top', 'drag-over-bottom'));
+            row.classList.add(insertBefore ? 'drag-over-top' : 'drag-over-bottom');
+        }
+
+        function handleAgentDrop(e) {
+            const row = e.target.closest('tr[data-agent-id]');
+            if (!row || !draggedAgentId || row.dataset.agentId === draggedAgentId) {
+                clearAgentDragIndicators();
+                draggedAgentId = null;
+                return;
+            }
+            e.preventDefault();
+
+            const rect = row.getBoundingClientRect();
+            const insertBefore = e.clientY < rect.top + rect.height / 2;
+            reorderAgent(draggedAgentId, row.dataset.agentId, insertBefore);
+
+            clearAgentDragIndicators();
+            draggedAgentId = null;
+        }
+
+        function handleAgentDragEnd() {
+            clearAgentDragIndicators();
+            draggedAgentId = null;
+        }
+
+        // Moves draggedId next to targetId in State.agents. The round-robin queue
+        // (State.queueIdx) is a raw array index, so a pure reorder would otherwise
+        // silently change who's "up next" -- this remembers the actual agent that
+        // was up next and re-points queueIdx at them in their new position.
+        function reorderAgent(draggedId, targetId, insertBefore) {
+            const draggedIdx = State.agents.findIndex(a => a.id === draggedId);
+            if (draggedIdx === -1) return;
+
+            const upNextAgent = State.agents[State.queueIdx] || null;
+
+            const [draggedAgent] = State.agents.splice(draggedIdx, 1);
+            const targetIdx = State.agents.findIndex(a => a.id === targetId);
+            const insertIdx = targetIdx === -1 ? State.agents.length : (insertBefore ? targetIdx : targetIdx + 1);
+            State.agents.splice(insertIdx, 0, draggedAgent);
+
+            if (upNextAgent) {
+                const newQueueIdx = State.agents.indexOf(upNextAgent);
+                if (newQueueIdx !== -1) State.queueIdx = newQueueIdx;
+            }
+
+            State.commit(['agents', 'queueIdx']);
+            syncUI();
+            notify(`Moved ${draggedAgent.name} in the roster.`);
         }
 
         function renderUsersTable() {
