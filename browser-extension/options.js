@@ -61,17 +61,11 @@ elSoundEnabled.addEventListener('change', () => {
     elSoundSelect.disabled = !elSoundEnabled.checked;
 });
 
-document.getElementById('btn-test-sound').addEventListener('click', async () => {
-    await chrome.offscreen.hasDocument().then(async (has) => {
-        if (!has) {
-            await chrome.offscreen.createDocument({
-                url: 'offscreen.html',
-                reasons: ['AUDIO_PLAYBACK'],
-                justification: 'Preview the selected alert sound.'
-            });
-        }
-    });
-    chrome.runtime.sendMessage({ type: 'playSound', sound: elSoundSelect.value });
+document.getElementById('btn-test-sound').addEventListener('click', () => {
+    // Routed through background.js's playSound() rather than managing the
+    // offscreen document here too -- one place to get the create-vs-message
+    // race right instead of two.
+    chrome.runtime.sendMessage({ type: 'testSound', sound: elSoundSelect.value });
 });
 
 init();

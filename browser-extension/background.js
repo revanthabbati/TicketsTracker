@@ -29,18 +29,28 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 
 chrome.runtime.onMessage.addListener((message) => {
     if (message && message.type === 'pollNow') checkForNewAssignments();
+    if (message && message.type === 'testSound' && message.sound) {
+        playSound(message.sound).catch(err => console.error('Tracker Notifier: test sound failed', err));
+    }
 });
 
 // MV3 service workers have no Audio API of their own -- play sounds via a
 // hidden offscreen document instead (created on demand, left open between
-// alerts since there's no meaningful cost to that).
-async function ensureOffscreenDocument() {
-    if (await chrome.offscreen.hasDocument()) return;
-    await chrome.offscreen.createDocument({
-        url: 'offscreen.html',
-        reasons: ['AUDIO_PLAYBACK'],
-        justification: 'Play a short alert sound when a ticket is assigned or the queue has unassigned tickets.'
-    });
+// alerts since there's no meaningful cost to that). If the document doesn't
+// exist yet, the sound is passed via the document's URL instead of a runtime
+// message, since a message sent immediately after createDocument() resolves
+// can otherwise race the document's own script still loading (see offscreen.js).
+async function playSound(soundName) {
+    const hasDoc = await chrome.offscreen.hasDocument();
+    if (hasDoc) {
+        chrome.runtime.sendMessage({ type: 'playSound', sound: soundName });
+    } else {
+        await chrome.offscreen.createDocument({
+            url: `offscreen.html?sound=${encodeURIComponent(soundName)}`,
+            reasons: ['AUDIO_PLAYBACK'],
+            justification: 'Play a short alert sound when a ticket is assigned or the queue has unassigned tickets.'
+        });
+    }
 }
 
 async function maybePlayAlertSound() {
@@ -50,8 +60,7 @@ async function maybePlayAlertSound() {
         const sound = soundChoice || 'chime';
         if (sound === 'none') return;
 
-        await ensureOffscreenDocument();
-        chrome.runtime.sendMessage({ type: 'playSound', sound });
+        await playSound(sound);
     } catch (err) {
         console.error('Tracker Notifier: failed to play alert sound', err);
     }
