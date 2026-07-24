@@ -3926,20 +3926,28 @@
             return { start, end: now };
         }
 
-        async function fetchSatisfactionRatings(zd, startUnix, endUnix, score) {
+        // Zendesk's search date filters only resolve to day granularity (account timezone),
+        // so the datetime-local custom-range inputs get truncated to their calendar date.
+        function toZendeskSearchDate(d) {
+            const y = d.getFullYear();
+            const m = String(d.getMonth() + 1).padStart(2, '0');
+            const day = String(d.getDate()).padStart(2, '0');
+            return `${y}-${m}-${day}`;
+        }
+
+        async function searchZendeskTickets(zd, query) {
             let results = [];
-            let target = `https://${zd.subdomain}.zendesk.com/api/v2/satisfaction_ratings.json?start_time=${startUnix}&end_time=${endUnix}&score=${score}`;
+            let target = `https://${zd.subdomain}.zendesk.com/api/v2/search.json?query=${encodeURIComponent(query)}&sort_by=updated_at&sort_order=desc`;
             while (target) {
                 const res = await zendeskFetch(target, { method: 'GET' });
                 if (!res.ok) throw new Error(`Zendesk returned ${res.status}`);
                 const data = await res.json();
-                results = results.concat(data.satisfaction_ratings || []);
+                results = results.concat(data.results || []);
                 target = data.next_page || null;
             }
             return results;
         }
 
-        // Zendesk requires end_time to be more than 60 seconds in the past.
         async function fetchCsatData() {
             const zd = State.settings.zendesk;
             if (!zd || !zd.subdomain || !zd.email || !zd.apiToken || !zd.proxyUrl) {
@@ -3950,21 +3958,24 @@
             }
 
             const range = getCsatDateRange();
-            const startUnix = Math.floor(range.start.getTime() / 1000);
-            const endUnixCap = Math.floor(Date.now() / 1000) - 120;
-            const endUnix = Math.min(Math.floor(range.end.getTime() / 1000), endUnixCap);
+            const startStr = toZendeskSearchDate(range.start);
+            const endStr = toZendeskSearchDate(range.end);
 
             UI.csatStatus.innerText = 'Loading…';
             UI.tableCsat.innerHTML = `<tr><td colspan="7" style="text-align:center; color: var(--text-muted); padding: 2rem;">Loading ratings from Zendesk…</td></tr>`;
 
             try {
-                const [goodRatings, badRatings] = await Promise.all([
-                    fetchSatisfactionRatings(zd, startUnix, endUnix, 'good'),
-                    fetchSatisfactionRatings(zd, startUnix, endUnix, 'bad')
+                // Good ratings: only tickets actually closed within the selected range.
+                // Bad ratings: same range, but not restricted to closed tickets -- an
+                // unhappy customer's ticket may still be open/pending, and it shouldn't
+                // disappear from view until it's dealt with, not until it happens to close.
+                const [goodTickets, badTickets] = await Promise.all([
+                    searchZendeskTickets(zd, `type:ticket status:closed satisfaction:good updated>=${startStr} updated<=${endStr}`),
+                    searchZendeskTickets(zd, `type:ticket satisfaction:bad updated>=${startStr} updated<=${endStr}`)
                 ]);
-                const allRatings = goodRatings.concat(badRatings);
+                const allTickets = goodTickets.concat(badTickets);
 
-                const assigneeIds = [...new Set(allRatings.map(r => r.assignee_id).filter(Boolean))];
+                const assigneeIds = [...new Set(allTickets.map(t => t.assignee_id).filter(Boolean))];
                 const infoById = {};
                 if (assigneeIds.length > 0) {
                     const target = `https://${zd.subdomain}.zendesk.com/api/v2/users/show_many.json?ids=${assigneeIds.join(',')}`;
@@ -3975,32 +3986,40 @@
                 }
 
                 const groups = {};
-                allRatings.forEach(r => {
-                    const info = infoById[r.assignee_id];
+                allTickets.forEach(t => {
+                    const rating = t.satisfaction_rating;
+                    if (!rating || (rating.score !== 'good' && rating.score !== 'bad')) return;
+
+                    const info = infoById[t.assignee_id];
                     const agent = info && info.email
                         ? State.agents.find(a => a.zendeskEmail && a.zendeskEmail.toLowerCase() === info.email.toLowerCase())
                         : null;
-                    const key = agent ? agent.id : (info ? `zd-${r.assignee_id}` : 'unknown');
+                    const key = agent ? agent.id : (info ? `zd-${t.assignee_id}` : 'unknown');
                     const displayName = agent ? agent.name : (info ? `${info.name} (unmatched)` : 'Unassigned');
 
                     if (!groups[key]) {
                         groups[key] = { name: displayName, goodWith: 0, goodWithout: 0, badWith: 0, badWithout: 0, ratings: [] };
                     }
-                    const hasComment = !!(r.comment && r.comment.trim());
-                    if (r.score === 'good') {
+                    const hasComment = !!(rating.comment && rating.comment.trim());
+                    if (rating.score === 'good') {
                         hasComment ? groups[key].goodWith++ : groups[key].goodWithout++;
-                    } else if (r.score === 'bad') {
+                    } else {
                         hasComment ? groups[key].badWith++ : groups[key].badWithout++;
                     }
-                    groups[key].ratings.push(r);
+                    groups[key].ratings.push({
+                        score: rating.score,
+                        comment: rating.comment,
+                        ticket_id: t.id,
+                        created_at: t.updated_at
+                    });
                 });
 
                 csatCache = Object.entries(groups)
                     .map(([key, g]) => ({ key, ...g }))
                     .sort((a, b) => a.name.localeCompare(b.name));
 
-                UI.statCsatGood.innerText = goodRatings.length;
-                UI.statCsatBad.innerText = badRatings.length;
+                UI.statCsatGood.innerText = goodTickets.length;
+                UI.statCsatBad.innerText = badTickets.length;
                 renderCsatTable();
                 UI.csatStatus.innerText = `Updated ${getFormattedTime()}`;
             } catch (err) {
