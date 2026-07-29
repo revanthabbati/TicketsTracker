@@ -4203,6 +4203,23 @@
         const AI_ANSWER_COMMENT_CHARS = 6000;
         const AI_COMMENT_FETCH_LIMIT = 25;
 
+        // The customer-account dropdown on tickets, whose values are lowercase hyphenated
+        // slugs (city-furniture, siteone, amwest). Needed because agents refer to customers
+        // by account name, which is neither a person nor an email.
+        const AI_SEARCH_ACCOUNT_FIELD_ID = 360012637271;
+
+        // The planner used to invent emails from names -- "harsha" became
+        // harsha@dispatchtrack.com, which matches nothing, while the real address is
+        // harsha.uppala@dispatchtrack.com. The roster is already in State.agents, so give
+        // it to the model instead of letting it guess.
+        function aiAgentRosterText() {
+            const roster = (State.agents || [])
+                .filter(a => a.zendeskEmail && a.zendeskEmail.trim())
+                .map(a => `- ${a.name}: ${a.zendeskEmail.trim()}`);
+            if (roster.length === 0) return 'No agent email list is available, so do not use assignee: with a guessed email.';
+            return `Agents and their Zendesk emails (use these verbatim -- never guess an address):\n${roster.join('\n')}`;
+        }
+
         // Long threads get their middle dropped rather than their tail: the resolution is
         // almost always the last thing said, so a plain slice() from the front would cut
         // off the very part a "what was the resolution?" question is asking about.
@@ -4265,16 +4282,25 @@ Available Zendesk search syntax:
 - priority:low|normal|high|urgent
 - requester:<email>
 - assignee:<email>
+- organization:<name>
+- satisfaction:good / satisfaction:bad -- the CSAT rating the customer left
 - tags:<tag>
 - subject:<word>  description:<word>
 - date filters: created / updated / solved followed by >, <, >=, or <= and a date in YYYY-MM-DD format
 - custom_field_${AI_SEARCH_JIRA_FLAG_FIELD_ID}:jira_yes / :jira_no -- whether an agent marked the ticket as having a linked Jira issue
+- custom_field_${AI_SEARCH_ACCOUNT_FIELD_ID}:<slug> -- the customer account, as a lowercase hyphenated slug (e.g. city-furniture, siteone, amwest)
 
 Today's date is ${todayStr} -- resolve relative dates ("today", "this week", "last month") against it.
 
 Any word that isn't one of the fields above (an activation code, order number, product name) goes in as a bare keyword, which Zendesk full-text searches across subject/description/comments.
 
 Zendesk search cannot OR multiple values of the same field in one query string. If more than one value of the same field is needed (e.g. "open and on-hold"), return a SEPARATE query per value -- the caller merges and dedupes them.
+
+NEVER invent an email address. Only use requester: or assignee: with an email that either appears in the agent list below or was typed out in full by the agent. When someone is referred to by name, look their email up in that list. If a name is not in the list, or the subject is a customer/company/account rather than a person, do NOT guess an email -- instead return multiple queries covering the plausible interpretations (organization:<name>, the account custom field with the name as a slug, and the name as a bare keyword). The caller merges them, so a query that matches nothing costs nothing.
+
+Zendesk cannot search on whether a CSAT rating has a comment. For questions about rating comments, search satisfaction:good or satisfaction:bad with the date range and set countOnly false -- the answering step gets each ticket's rating and comment and can count them itself.
+
+${aiAgentRosterText()}
 
 Conversation so far:
 ${aiChatHistoryText()}
@@ -4288,7 +4314,7 @@ Decide:
 - "queries": the query strings to run. Required when action is "search", otherwise [].
 - "countOnly": true if the message only asks how many (a number answers it fully). The caller then reads Zendesk's result count without downloading every ticket, so this works for very large sets.
 - "listOnly": true if the agent just wants to see the matching tickets listed, with no question to answer in prose.
-- "needsComments": true only if answering genuinely needs what was said inside the tickets (resolutions, what an agent replied, root cause). False for questions answerable from subject, status, assignee, dates, or counts. Fetching comments is slow, so don't set it unless it's needed.
+- "needsComments": true whenever answering depends on what was actually said or done inside the tickets. That covers resolutions, what an agent replied, root cause, configuration or sample values asked for, and any judgement call about the tickets ("why is this on hold?", "which of these could be closed?", "was this ever answered?"). False only for questions fully answerable from subject, status, assignee, priority, dates, ratings or counts. Fetching comments is slow, so don't set it when the metadata already answers the question.
 
 Respond with ONLY strict JSON, no markdown fences, no commentary:
 {"action":"search","queries":["type:ticket status:open requester:jane@acme.com"],"countOnly":false,"listOnly":false,"needsComments":false}`;
@@ -4325,6 +4351,15 @@ Respond with ONLY strict JSON, no markdown fences, no commentary:
                     `Created: ${t.created_at} | Last updated: ${t.updated_at}`,
                 ];
                 if (t.jiraKeys && t.jiraKeys.length) lines.push(`Linked Jira: ${t.jiraKeys.join(', ')}`);
+                // Free -- the rating rides along on the ticket in search results, and it's
+                // the only way to answer "how many CSATs had comments?" since Zendesk can't
+                // search on the presence of a rating comment.
+                const rating = t.satisfaction_rating;
+                if (rating && rating.score && rating.score !== 'unoffered') {
+                    lines.push(`CSAT rating: ${rating.score}${rating.comment ? ` | rating comment: ${rating.comment}` : ' | no rating comment'}`);
+                }
+                const account = (t.custom_fields || []).find(cf => cf.id === AI_SEARCH_ACCOUNT_FIELD_ID);
+                if (account && account.value) lines.push(`Customer account: ${account.value}`);
                 lines.push(`Description: ${(t.description || '(none)').slice(0, AI_ANSWER_DESC_CHARS)}`);
                 if (t.commentText) lines.push(`Conversation:\n${trimCommentThread(t.commentText)}`);
                 return lines.join('\n');
@@ -4379,13 +4414,19 @@ Agent's question: "${message}"`;
         // Cheap path for "how many..." questions: Zendesk's search response carries a
         // count, so there's no need to page through (or cap) the actual tickets.
         async function fetchAiSearchCounts(zd, queries) {
-            return Promise.all(queries.map(async q => {
+            const settled = await Promise.allSettled(queries.map(async q => {
                 const target = `https://${zd.subdomain}.zendesk.com/api/v2/search.json?query=${encodeURIComponent(q)}`;
                 const res = await zendeskFetch(target, { method: 'GET' });
                 if (!res.ok) throw new Error(`Zendesk returned ${res.status}`);
                 const data = await res.json();
                 return { query: q, count: data.count || 0 };
             }));
+            // Same tolerance as the search path -- one unusable query shouldn't sink a count.
+            const ok = settled.filter(s => s.status === 'fulfilled').map(s => s.value);
+            if (ok.length === 0) {
+                throw new Error(settled[0] && settled[0].reason ? settled[0].reason.message : 'every Zendesk count query failed');
+            }
+            return ok;
         }
 
         // Capped variant of searchZendeskTickets -- an overly-broad AI-generated query
@@ -4505,7 +4546,8 @@ Agent's question: "${message}"`;
                         : '';
                     setAiChatThinking('Writing an answer…');
                     const answer = await answerAiChatQuestion(message, [],
-                        `Zendesk reported these result counts:\n${counts.map(c => `- ${c.count} ticket(s) matching ${c.query}`).join('\n')}\nCombined total across queries (may double-count a ticket matching more than one): ${total}.`);
+                        `Zendesk reported these result counts:\n${counts.map(c => `- ${c.count} ticket(s) matching ${c.query}`).join('\n')}\nCombined total across queries (may double-count a ticket matching more than one): ${total}.` +
+                        (total === 0 ? `\nEverything came back zero. Say so, quote the filters that were used, and note that a name, email or account in them may not match what Zendesk holds -- do not present zero as a confident finding.` : ''));
                     setAiChatThinking(null);
                     aiChatHistory.push({ role: 'user', text: message });
                     aiChatHistory.push({ role: 'assistant', text: answer });
@@ -4517,7 +4559,17 @@ Agent's question: "${message}"`;
                 let truncated = false;
                 if (plan.action === 'search') {
                     setAiChatThinking('Searching Zendesk…');
-                    const searchResults = await Promise.all(plan.queries.map(q => searchZendeskTicketsCapped(zd, q)));
+                    // Tolerate individual query failures. The planner is now asked to guess
+                    // several interpretations of a name (organization, account slug, bare
+                    // keyword), so one rejected query must not take the whole turn down --
+                    // only give up if every query failed.
+                    const settled = await Promise.allSettled(plan.queries.map(q => searchZendeskTicketsCapped(zd, q)));
+                    const searchResults = settled.filter(s => s.status === 'fulfilled').map(s => s.value);
+                    settled.filter(s => s.status === 'rejected')
+                        .forEach((s, i) => console.warn('AI Search: a query failed and was skipped', plan.queries[i], s.reason));
+                    if (searchResults.length === 0) {
+                        throw new Error(settled[0] && settled[0].reason ? settled[0].reason.message : 'every Zendesk query failed');
+                    }
                     truncated = searchResults.some(r => r.truncated);
                     const byId = new Map();
                     searchResults.forEach(r => r.results.forEach(t => { if (t.id != null) byId.set(t.id, t); }));
@@ -4543,12 +4595,23 @@ Agent's question: "${message}"`;
                     fetchAiSearchJiraLinks(tickets).catch(err => console.error(err));
                 }
 
+                // A search that matched nothing used to still go to the answering step,
+                // which replied "the provided ticket data does not contain..." -- that reads
+                // like the tool is broken rather than like the search came back empty. Say
+                // what was actually tried instead.
+                if (plan.action === 'search' && aiSearchCache.length === 0) {
+                    setAiChatThinking(null);
+                    const answer = `No tickets matched that search, so there's nothing to answer from. Zendesk was queried for:\n${plan.queries.map(q => `- \`${q}\``).join('\n')}\n\nIf a name or account in there looks wrong, try giving the exact email address or account name.`;
+                    aiChatHistory.push({ role: 'user', text: message });
+                    aiChatHistory.push({ role: 'assistant', text: answer });
+                    appendAiChatBubble('assistant', answer);
+                    return;
+                }
+
                 if (plan.listOnly) {
                     setAiChatThinking(null);
                     const count = aiSearchCache.length;
-                    const answer = count === 0
-                        ? 'No tickets matched that.'
-                        : `Found ${count} ticket${count === 1 ? '' : 's'} — listed in the results table below${truncated ? ' (capped; narrow the question to see more)' : ''}.`;
+                    const answer = `Found ${count} ticket${count === 1 ? '' : 's'} — listed in the results table below${truncated ? ' (capped; narrow the question to see more)' : ''}.`;
                     aiChatHistory.push({ role: 'user', text: message });
                     aiChatHistory.push({ role: 'assistant', text: answer });
                     appendAiChatBubble('assistant', answer);
