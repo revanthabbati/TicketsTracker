@@ -70,6 +70,10 @@
                     <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg>
                     CSAT
                 </button>
+                <button class="nav-item perm-ai-search" data-target="view-ai-search">
+                    <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line><path d="M11 8v6M8 11h6"></path></svg>
+                    AI Search
+                </button>
                 <button class="nav-item admin-only" data-target="view-users">
                     <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
                     User Accounts
@@ -631,6 +635,53 @@
                     </div>
                 </section>
 
+                <section id="view-ai-search" class="view-section perm-ai-search">
+                    <div class="view-header-flex" style="margin-bottom: 1.5rem;">
+                        <div class="page-title">
+                            <h1>AI Search</h1>
+                            <p>Ask a question in plain English to look up matching Zendesk tickets.</p>
+                        </div>
+                    </div>
+
+                    <div class="panel">
+                        <div class="panel-body">
+                            <div style="display:flex; gap:0.75rem; align-items:flex-start; flex-wrap: wrap;">
+                                <textarea id="ai-search-prompt" class="input-control" rows="2" style="flex: 1; min-width: 280px; resize: vertical;" placeholder="e.g. open and on-hold tickets from requester jane@acme.com, or tickets mentioning activation code ABC123"></textarea>
+                                <button class="btn btn-primary" id="btn-ai-search" style="padding: 0.6rem 1.5rem;">Search</button>
+                            </div>
+                            <div style="margin-top: 0.6rem; font-size: 0.8rem; color: var(--text-muted);">
+                                <span id="ai-search-status"></span>
+                                <span id="ai-search-interpreted"></span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="panel" style="margin-top: 1.5rem;">
+                        <div class="panel-header">
+                            <h2>Results</h2>
+                        </div>
+                        <div class="panel-body" style="padding-top: 0.5rem;">
+                            <div style="max-height: 600px; overflow-y: auto;">
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th style="width: 2rem;"></th>
+                                            <th>Ticket</th>
+                                            <th>Assignee</th>
+                                            <th>Status</th>
+                                            <th>Priority</th>
+                                            <th>Created</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="table-ai-search">
+                                        <tr><td colspan="6" style="text-align:center; color: var(--text-muted); padding: 2rem;">Type a prompt above and click Search.</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
                 <section id="view-users" class="view-section admin-only">
                     <div class="view-header-flex" style="margin-bottom: 1.5rem;">
                         <div class="page-title">
@@ -664,6 +715,7 @@
                                             <label class="perm-check"><input type="checkbox" id="user-perm-shifts"> Can Manage Shift Timings</label>
                                             <label class="perm-check"><input type="checkbox" id="user-perm-tickets"> Can Edit/Delete Tickets</label>
                                             <label class="perm-check"><input type="checkbox" id="user-perm-csat"> Can View CSAT</label>
+                                            <label class="perm-check"><input type="checkbox" id="user-perm-ai-search"> Can Use AI Search</label>
                                         </div>
                                     </div>
                                     <button type="submit" class="btn btn-primary" style="width: 100%;">Create Account</button>
@@ -816,6 +868,7 @@
                         <label class="perm-check"><input type="checkbox" id="edit-perm-shifts"> Can Manage Shift Timings</label>
                         <label class="perm-check"><input type="checkbox" id="edit-perm-tickets"> Can Edit/Delete Tickets</label>
                         <label class="perm-check"><input type="checkbox" id="edit-perm-csat"> Can View CSAT</label>
+                        <label class="perm-check"><input type="checkbox" id="edit-perm-ai-search"> Can Use AI Search</label>
                     </div>
                 </div>
                 <div style="display: flex; gap: 1rem; margin-top: 2rem;">
@@ -1214,6 +1267,7 @@
             manageShiftsElements: document.querySelectorAll('.perm-manage-shifts'),
             manageTicketsElements: document.querySelectorAll('.perm-manage-tickets'),
             viewCsatElements: document.querySelectorAll('.perm-view-csat'),
+            aiSearchElements: document.querySelectorAll('.perm-ai-search'),
 
             statAgentsSupport: document.getElementById('stat-support'),
             statAgentsCse: document.getElementById('stat-cse'),
@@ -1293,6 +1347,7 @@
             inputPermShifts: document.getElementById('user-perm-shifts'),
             inputPermTickets: document.getElementById('user-perm-tickets'),
             inputPermCsat: document.getElementById('user-perm-csat'),
+            inputPermAiSearch: document.getElementById('user-perm-ai-search'),
             tableUsers: document.getElementById('table-users'),
 
             // Zendesk Queue
@@ -1322,6 +1377,13 @@
             csatStatus: document.getElementById('csat-status'),
             btnRefreshCsat: document.getElementById('btn-refresh-csat'),
             tableCsat: document.getElementById('table-csat'),
+
+            // AI Search
+            aiSearchPrompt: document.getElementById('ai-search-prompt'),
+            btnAiSearch: document.getElementById('btn-ai-search'),
+            aiSearchStatus: document.getElementById('ai-search-status'),
+            aiSearchInterpreted: document.getElementById('ai-search-interpreted'),
+            tableAiSearch: document.getElementById('table-ai-search'),
 
             // Modals
             modalEditTicket: document.getElementById('modal-edit-ticket'),
@@ -1357,6 +1419,7 @@
             editPermShifts: document.getElementById('edit-perm-shifts'),
             editPermTickets: document.getElementById('edit-perm-tickets'),
             editPermCsat: document.getElementById('edit-perm-csat'),
+            editPermAiSearch: document.getElementById('edit-perm-ai-search'),
 
             modalResetPass: document.getElementById('modal-reset-pass'),
             formResetPass: document.getElementById('form-reset-pass'),
@@ -1567,6 +1630,8 @@
             UI.csatEnd.addEventListener('change', fetchCsatData);
             UI.btnRefreshCsat.addEventListener('click', fetchCsatData);
 
+            UI.btnAiSearch.addEventListener('click', runAiSearch);
+
             UI.zendeskSelectAll.addEventListener('change', () => {
                 if (UI.zendeskSelectAll.checked) {
                     zendeskQueueCache.forEach(t => zendeskSelectedIds.add(t.id));
@@ -1651,12 +1716,14 @@
             const canManageShifts = isAdmin || (user.permissions && user.permissions.manageShifts);
             const canManageTickets = isAdmin || (user.permissions && user.permissions.manageTickets);
             const canViewCsat = isAdmin || (user.permissions && user.permissions.viewCsat);
+            const canAiSearch = isAdmin || (user.permissions && user.permissions.aiSearch);
 
             UI.adminElements.forEach(el => el.classList.toggle('hidden', !isAdmin));
             UI.manageAgentsElements.forEach(el => el.classList.toggle('hidden', !canManageAgents));
             UI.manageShiftsElements.forEach(el => el.classList.toggle('hidden', !canManageShifts));
             UI.manageTicketsElements.forEach(el => el.classList.toggle('hidden', !canManageTickets));
             UI.viewCsatElements.forEach(el => el.classList.toggle('hidden', !canViewCsat));
+            UI.aiSearchElements.forEach(el => el.classList.toggle('hidden', !canAiSearch));
 
             if (!canManageAgents) {
                 UI.rosterGrid.style.gridTemplateColumns = "1fr";
@@ -1822,6 +1889,7 @@
                 UI.editPermShifts.checked = user.permissions?.manageShifts || false;
                 UI.editPermTickets.checked = user.permissions?.manageTickets || false;
                 UI.editPermCsat.checked = user.permissions?.viewCsat || false;
+                UI.editPermAiSearch.checked = user.permissions?.aiSearch || false;
                 UI.modalEditUser.classList.add('active');
             }
         };
@@ -1857,7 +1925,8 @@
                     manageAgents: UI.editPermAgents.checked,
                     manageShifts: UI.editPermShifts.checked,
                     manageTickets: UI.editPermTickets.checked,
-                    viewCsat: UI.editPermCsat.checked
+                    viewCsat: UI.editPermCsat.checked,
+                    aiSearch: UI.editPermAiSearch.checked
                 };
                 State.commit(['users']);
                 syncUI();
@@ -2146,7 +2215,8 @@
                     manageAgents: UI.inputPermAgents.checked,
                     manageShifts: UI.inputPermShifts.checked,
                     manageTickets: UI.inputPermTickets.checked,
-                    viewCsat: UI.inputPermCsat.checked
+                    viewCsat: UI.inputPermCsat.checked,
+                    aiSearch: UI.inputPermAiSearch.checked
                 }
             });
             State.commit(['users']);
@@ -2157,6 +2227,7 @@
             UI.inputPermShifts.checked = false;
             UI.inputPermTickets.checked = false;
             UI.inputPermCsat.checked = false;
+            UI.inputPermAiSearch.checked = false;
             renderUsersTable();
             notify("New user account created.");
         }
@@ -2880,6 +2951,7 @@
                     if (u.permissions.manageShifts) permBadges += `<span class="badge badge-perm">Shifts</span>`;
                     if (u.permissions.manageTickets) permBadges += `<span class="badge badge-perm" style="color: #4f46e5; background:rgba(79, 70, 229, 0.15);">Tickets</span>`;
                     if (u.permissions.viewCsat) permBadges += `<span class="badge badge-perm" style="color: #10b981; background:rgba(16, 185, 129, 0.15);">CSAT</span>`;
+                    if (u.permissions.aiSearch) permBadges += `<span class="badge badge-perm" style="color: #8b5cf6; background:rgba(139, 92, 246, 0.15);">AI Search</span>`;
                 }
 
                 const isSelf = State.currentUser.id === u.id;
@@ -4090,6 +4162,222 @@
             `);
         };
 
+        let aiSearchCache = [];
+
+        // Zendesk search can't OR multiple values of the same field in one query, so the
+        // AI is asked to return one query string per value instead (e.g. "open and on-hold"
+        // becomes two queries, status:open and status:hold) -- results get merged below.
+        async function translateAiSearchPrompt(promptText) {
+            const ai = State.settings.ai;
+            const model = ai.model || 'gemini-2.0-flash';
+            const today = new Date();
+            const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+
+            const instructions = `You translate a support agent's plain-English request into one or more Zendesk Search API query strings.
+
+Available Zendesk search syntax:
+- type:ticket (always include this in every query)
+- status:new|open|pending|hold|solved|closed
+- priority:low|normal|high|urgent
+- requester:<email>
+- assignee:<email>
+- tags:<tag>
+- subject:<word>  description:<word>
+- date filters: created / updated / solved followed by >, <, >=, or <= and a date in YYYY-MM-DD format
+
+Today's date is ${todayStr} -- resolve relative dates ("today", "this week", "last month") against it.
+
+Any word in the request that isn't a field above (e.g. an activation code, order number, or product name) should be included as a bare keyword, which Zendesk full-text searches across ticket subject/description/comments.
+
+Zendesk search cannot OR multiple values of the same field within one query string. If the request needs more than one value for the same field (e.g. "open and on-hold tickets"), return a SEPARATE query string per value -- the caller merges the results.
+
+Respond with ONLY strict JSON, no markdown code fences, no commentary, in exactly this shape:
+{"queries": ["type:ticket status:open requester:jane@acme.com", "type:ticket status:hold requester:jane@acme.com"]}
+
+Request: "${promptText}"`;
+
+            const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${ai.apiKey}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ contents: [{ parts: [{ text: instructions }] }] })
+            });
+            if (!res.ok) throw new Error(`Gemini returned ${res.status}`);
+            const data = await res.json();
+            const text = data.candidates && data.candidates[0] && data.candidates[0].content
+                && data.candidates[0].content.parts && data.candidates[0].content.parts[0]
+                && data.candidates[0].content.parts[0].text;
+            if (!text) throw new Error('AI returned no text.');
+
+            // Gemini sometimes wraps JSON in ```json fences despite being told not to.
+            const cleaned = text.trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
+            let parsed;
+            try {
+                parsed = JSON.parse(cleaned);
+            } catch (e) {
+                throw new Error(`AI returned invalid JSON: ${cleaned.slice(0, 200)}`);
+            }
+            if (!parsed.queries || !Array.isArray(parsed.queries) || parsed.queries.length === 0) {
+                throw new Error('AI did not return any search queries.');
+            }
+            return parsed.queries;
+        }
+
+        // Capped variant of searchZendeskTickets -- an overly-broad AI-generated query
+        // (e.g. "type:ticket status:open" with no other filter) could otherwise page
+        // through thousands of tickets. Reports whether it stopped early so the UI can
+        // say so instead of silently showing a partial result set as if it were complete.
+        async function searchZendeskTicketsCapped(zd, query, maxPages = 3) {
+            let results = [];
+            let target = `https://${zd.subdomain}.zendesk.com/api/v2/search.json?query=${encodeURIComponent(query)}&sort_by=created_at&sort_order=desc`;
+            let pages = 0;
+            while (target && pages < maxPages) {
+                const res = await zendeskFetch(target, { method: 'GET' });
+                if (!res.ok) throw new Error(`Zendesk returned ${res.status}`);
+                const data = await res.json();
+                results = results.concat(data.results || []);
+                target = data.next_page || null;
+                pages++;
+            }
+            return { results, truncated: !!target };
+        }
+
+        async function runAiSearch() {
+            const promptText = UI.aiSearchPrompt.value.trim();
+            if (!promptText) {
+                notify('Type a prompt first.');
+                return;
+            }
+
+            const zd = State.settings.zendesk;
+            if (!zd || !zd.subdomain || !zd.email || !zd.apiToken || !zd.proxyUrl) {
+                UI.tableAiSearch.innerHTML = `<tr><td colspan="6" style="text-align:center; color: var(--text-muted); padding: 2rem;">Configure Zendesk in <a href="admin.html">admin.html</a> first.</td></tr>`;
+                return;
+            }
+            const ai = State.settings.ai;
+            if (!ai || !ai.apiKey) {
+                UI.tableAiSearch.innerHTML = `<tr><td colspan="6" style="text-align:center; color: var(--text-muted); padding: 2rem;">No AI API key configured. Set one up in admin.html.</td></tr>`;
+                return;
+            }
+
+            UI.btnAiSearch.disabled = true;
+            UI.aiSearchStatus.innerText = 'Thinking…';
+            UI.aiSearchInterpreted.innerText = '';
+            UI.tableAiSearch.innerHTML = `<tr><td colspan="6" style="text-align:center; color: var(--text-muted); padding: 2rem;">Working…</td></tr>`;
+
+            try {
+                const queries = await translateAiSearchPrompt(promptText);
+                UI.aiSearchInterpreted.innerText = ` — Interpreted as: ${queries.join('  |  ')}`;
+                UI.aiSearchStatus.innerText = 'Searching Zendesk…';
+
+                const searchResults = await Promise.all(queries.map(q => searchZendeskTicketsCapped(zd, q)));
+                const truncated = searchResults.some(r => r.truncated);
+                const byId = new Map();
+                searchResults.forEach(r => r.results.forEach(t => { if (t.id != null) byId.set(t.id, t); }));
+                const tickets = [...byId.values()].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+                const ids = [...new Set(tickets.flatMap(t => [t.requester_id, t.assignee_id]).filter(Boolean))]
+                    .filter(id => !(id in zendeskRequesterMap));
+                if (ids.length > 0) {
+                    const target = `https://${zd.subdomain}.zendesk.com/api/v2/users/show_many.json?ids=${ids.join(',')}`;
+                    const res = await zendeskFetch(target, { method: 'GET' });
+                    if (res.ok) {
+                        const data = await res.json();
+                        (data.users || []).forEach(u => { zendeskRequesterMap[u.id] = { name: u.name, email: u.email || '' }; });
+                    }
+                }
+
+                aiSearchCache = tickets;
+                renderAiSearchTable();
+                UI.aiSearchStatus.innerText = `${tickets.length} ticket${tickets.length === 1 ? '' : 's'} found${truncated ? ' (truncated — refine your prompt for more)' : ''}`;
+            } catch (err) {
+                console.error(err);
+                UI.aiSearchStatus.innerText = '';
+                UI.tableAiSearch.innerHTML = `<tr><td colspan="6" style="text-align:center; color: #f43f5e; padding: 2rem;">Couldn't run the search — check the console.</td></tr>`;
+                notify("AI Search failed — check the console.");
+            } finally {
+                UI.btnAiSearch.disabled = false;
+            }
+        }
+
+        function renderAiSearchTable() {
+            UI.tableAiSearch.innerHTML = '';
+
+            if (aiSearchCache.length === 0) {
+                UI.tableAiSearch.innerHTML = `<tr><td colspan="6" style="text-align:center; color: var(--text-muted); padding: 2rem;">No matching tickets found.</td></tr>`;
+                return;
+            }
+
+            aiSearchCache.forEach(t => {
+                const requester = zendeskRequesterMap[t.requester_id] || { name: t.requester_id ? `Requester #${t.requester_id}` : 'Unknown', email: '' };
+                const assignee = zendeskRequesterMap[t.assignee_id] || { name: t.assignee_id ? `Agent #${t.assignee_id}` : 'Unassigned', email: '' };
+                const ticketUrl = `https://${State.settings.zendesk.subdomain}.zendesk.com/agent/tickets/${t.id}`;
+                const priority = t.priority || 'normal';
+                const createdDisplay = formatZendeskTimestamp(t.created_at);
+
+                UI.tableAiSearch.insertAdjacentHTML('beforeend', `
+                    <tr id="ai-search-row-${t.id}">
+                        <td>
+                            <button class="btn-icon" title="Summarize" onclick="window.toggleAiSearchSummary(${t.id})">
+                                <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                            </button>
+                        </td>
+                        <td class="ticket-subject-cell">
+                            <span class="subj"><a href="${ticketUrl}" target="_blank" rel="noopener">#${t.id}</a> &mdash; ${escapeHtml(t.subject || '(no subject)')}</span>
+                            <span class="req">${escapeHtml(requester.name)}${requester.email ? ` &lt;${escapeHtml(requester.email)}&gt;` : ''}</span>
+                        </td>
+                        <td>${escapeHtml(assignee.name)}</td>
+                        <td><span class="badge-shift">${escapeHtml(t.status || '')}</span></td>
+                        <td><span class="priority-badge priority-${escapeHtml(priority)}">${escapeHtml(priority)}</span></td>
+                        <td style="color: var(--text-muted);">${createdDisplay}</td>
+                    </tr>
+                `);
+            });
+        }
+
+        window.toggleAiSearchSummary = async function(ticketId) {
+            const existing = document.getElementById(`ai-search-detail-${ticketId}`);
+            if (existing) { existing.remove(); return; }
+
+            const ticket = aiSearchCache.find(t => t.id === ticketId);
+            const row = document.getElementById(`ai-search-row-${ticketId}`);
+            if (!ticket || !row) return;
+
+            row.insertAdjacentHTML('afterend', `
+                <tr id="ai-search-detail-${ticketId}">
+                    <td colspan="6"><div class="summary-box">${escapeHtml(ticket.aiSummary || 'Summarizing…')}</div></td>
+                </tr>
+            `);
+            if (ticket.aiSummary) return;
+
+            const ai = State.settings.ai;
+            const cell = document.querySelector(`#ai-search-detail-${ticketId} .summary-box`);
+            if (!ai || !ai.apiKey) {
+                if (cell) cell.innerText = 'No AI API key configured. Set one up in admin.html.';
+                return;
+            }
+
+            try {
+                const model = ai.model || 'gemini-2.0-flash';
+                const prompt = `Summarize this support ticket in 2-3 short sentences for an agent about to pick it up. Focus on what the customer wants and any urgency.\n\nSubject: ${ticket.subject || ''}\n\nDescription: ${ticket.description || '(no description)'}`;
+                const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${ai.apiKey}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+                });
+                if (!res.ok) throw new Error(`Gemini returned ${res.status}`);
+                const data = await res.json();
+                const text = data.candidates && data.candidates[0] && data.candidates[0].content
+                    && data.candidates[0].content.parts && data.candidates[0].content.parts[0]
+                    && data.candidates[0].content.parts[0].text;
+                ticket.aiSummary = (text || 'No summary returned.').trim();
+            } catch (err) {
+                console.error(err);
+                ticket.aiSummary = 'Could not generate a summary — check the console.';
+            }
+
+            if (cell) cell.innerText = ticket.aiSummary;
+        };
+
         function switchView(clickedNav) {
             UI.navItems.forEach(n => n.classList.remove('active'));
             clickedNav.classList.add('active');
@@ -4102,6 +4390,8 @@
                 refreshActiveZendeskTab();
             } else if (clickedNav.dataset.target === 'view-csat') {
                 fetchCsatData();
+            } else if (clickedNav.dataset.target === 'view-ai-search') {
+                UI.aiSearchPrompt.focus();
             }
         }
 
