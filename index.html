@@ -659,6 +659,11 @@
                     <div class="panel" style="margin-top: 1.5rem;">
                         <div class="panel-header">
                             <h2>Results</h2>
+                            <div class="data-controls">
+                                <button class="btn btn-outline" id="btn-ai-search-export-csv" style="padding: 0.4rem 1rem; font-size: 0.8rem;">Export CSV</button>
+                                <button class="btn btn-outline" id="btn-ai-search-export-pdf" style="padding: 0.4rem 1rem; font-size: 0.8rem;">Export PDF</button>
+                                <button class="btn btn-outline" id="btn-ai-search-export-doc" style="padding: 0.4rem 1rem; font-size: 0.8rem;">Export Word</button>
+                            </div>
                         </div>
                         <div class="panel-body" style="padding-top: 0.5rem;">
                             <div style="max-height: 600px; overflow-y: auto;">
@@ -666,15 +671,16 @@
                                     <thead>
                                         <tr>
                                             <th style="width: 2rem;"></th>
-                                            <th>Ticket</th>
-                                            <th>Assignee</th>
-                                            <th>Status</th>
-                                            <th>Priority</th>
-                                            <th>Created</th>
+                                            <th class="ai-sort-th" onclick="window.setAiSearchSort('ticket')">Ticket <span id="ai-sort-ind-ticket" class="ai-sort-ind"></span></th>
+                                            <th class="ai-sort-th" onclick="window.setAiSearchSort('assignee')">Assignee <span id="ai-sort-ind-assignee" class="ai-sort-ind"></span></th>
+                                            <th class="ai-sort-th" onclick="window.setAiSearchSort('status')">Status <span id="ai-sort-ind-status" class="ai-sort-ind"></span></th>
+                                            <th class="ai-sort-th" onclick="window.setAiSearchSort('jira')">Jira <span id="ai-sort-ind-jira" class="ai-sort-ind"></span></th>
+                                            <th class="ai-sort-th" onclick="window.setAiSearchSort('created')">Created <span id="ai-sort-ind-created" class="ai-sort-ind"></span></th>
+                                            <th class="ai-sort-th" onclick="window.setAiSearchSort('updated')">Last Updated <span id="ai-sort-ind-updated" class="ai-sort-ind"></span></th>
                                         </tr>
                                     </thead>
                                     <tbody id="table-ai-search">
-                                        <tr><td colspan="6" style="text-align:center; color: var(--text-muted); padding: 2rem;">Type a prompt above and click Search.</td></tr>
+                                        <tr><td colspan="7" style="text-align:center; color: var(--text-muted); padding: 2rem;">Type a prompt above and click Search.</td></tr>
                                     </tbody>
                                 </table>
                             </div>
@@ -1384,6 +1390,9 @@
             aiSearchStatus: document.getElementById('ai-search-status'),
             aiSearchInterpreted: document.getElementById('ai-search-interpreted'),
             tableAiSearch: document.getElementById('table-ai-search'),
+            btnAiSearchExportCsv: document.getElementById('btn-ai-search-export-csv'),
+            btnAiSearchExportPdf: document.getElementById('btn-ai-search-export-pdf'),
+            btnAiSearchExportDoc: document.getElementById('btn-ai-search-export-doc'),
 
             // Modals
             modalEditTicket: document.getElementById('modal-edit-ticket'),
@@ -1631,6 +1640,9 @@
             UI.btnRefreshCsat.addEventListener('click', fetchCsatData);
 
             UI.btnAiSearch.addEventListener('click', runAiSearch);
+            UI.btnAiSearchExportCsv.addEventListener('click', exportAiSearchCsv);
+            UI.btnAiSearchExportPdf.addEventListener('click', exportAiSearchPdf);
+            UI.btnAiSearchExportDoc.addEventListener('click', exportAiSearchDoc);
 
             UI.zendeskSelectAll.addEventListener('change', () => {
                 if (UI.zendeskSelectAll.checked) {
@@ -4184,6 +4196,7 @@ Available Zendesk search syntax:
 - tags:<tag>
 - subject:<word>  description:<word>
 - date filters: created / updated / solved followed by >, <, >=, or <= and a date in YYYY-MM-DD format
+- custom_field_${AI_SEARCH_JIRA_FLAG_FIELD_ID}:jira_yes / :jira_no -- whether an agent marked the ticket as having a linked Jira issue (use this for requests like "tickets with a Jira linked")
 
 Today's date is ${todayStr} -- resolve relative dates ("today", "this week", "last month") against it.
 
@@ -4250,19 +4263,19 @@ Request: "${promptText}"`;
 
             const zd = State.settings.zendesk;
             if (!zd || !zd.subdomain || !zd.email || !zd.apiToken || !zd.proxyUrl) {
-                UI.tableAiSearch.innerHTML = `<tr><td colspan="6" style="text-align:center; color: var(--text-muted); padding: 2rem;">Configure Zendesk in <a href="admin.html">admin.html</a> first.</td></tr>`;
+                UI.tableAiSearch.innerHTML = `<tr><td colspan="7" style="text-align:center; color: var(--text-muted); padding: 2rem;">Configure Zendesk in <a href="admin.html">admin.html</a> first.</td></tr>`;
                 return;
             }
             const ai = State.settings.ai;
             if (!ai || !ai.apiKey) {
-                UI.tableAiSearch.innerHTML = `<tr><td colspan="6" style="text-align:center; color: var(--text-muted); padding: 2rem;">No AI API key configured. Set one up in admin.html.</td></tr>`;
+                UI.tableAiSearch.innerHTML = `<tr><td colspan="7" style="text-align:center; color: var(--text-muted); padding: 2rem;">No AI API key configured. Set one up in admin.html.</td></tr>`;
                 return;
             }
 
             UI.btnAiSearch.disabled = true;
             UI.aiSearchStatus.innerText = 'Thinking…';
             UI.aiSearchInterpreted.innerText = '';
-            UI.tableAiSearch.innerHTML = `<tr><td colspan="6" style="text-align:center; color: var(--text-muted); padding: 2rem;">Working…</td></tr>`;
+            UI.tableAiSearch.innerHTML = `<tr><td colspan="7" style="text-align:center; color: var(--text-muted); padding: 2rem;">Working…</td></tr>`;
 
             try {
                 const queries = await translateAiSearchPrompt(promptText);
@@ -4289,30 +4302,180 @@ Request: "${promptText}"`;
                 aiSearchCache = tickets;
                 renderAiSearchTable();
                 UI.aiSearchStatus.innerText = `${tickets.length} ticket${tickets.length === 1 ? '' : 's'} found${truncated ? ' (truncated — refine your prompt for more)' : ''}`;
+
+                // Not awaited: the table is already usable, and Jira links are one request
+                // per ticket, so they fill in behind the rendered rows.
+                fetchAiSearchJiraLinks(tickets).catch(err => console.error(err));
             } catch (err) {
                 console.error(err);
                 UI.aiSearchStatus.innerText = '';
-                UI.tableAiSearch.innerHTML = `<tr><td colspan="6" style="text-align:center; color: #f43f5e; padding: 2rem;">Couldn't run the search — check the console.</td></tr>`;
+                UI.tableAiSearch.innerHTML = `<tr><td colspan="7" style="text-align:center; color: #f43f5e; padding: 2rem;">Couldn't run the search — check the console.</td></tr>`;
                 notify("AI Search failed — check the console.");
             } finally {
                 UI.btnAiSearch.disabled = false;
             }
         }
 
+        // Same shape as formatZendeskTimestamp but with the year -- AI Search routinely
+        // surfaces tickets months or years old, where a bare "Apr 2" is ambiguous.
+        function formatZendeskTimestampWithYear(isoString) {
+            if (!isoString) return '';
+            const d = new Date(isoString);
+            if (isNaN(d.getTime())) return '';
+            return d.toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true });
+        }
+
+        // The "Jira If Yes link the Jira to the ticket" dropdown an agent fills in by hand.
+        // It's only a self-reported flag -- the authoritative link data comes from the Jira
+        // integration (fetchAiSearchJiraLinks below), so this is the fallback, not the source.
+        const AI_SEARCH_JIRA_FLAG_FIELD_ID = 31692887760155;
+
+        function getTicketJiraFlag(ticket) {
+            const field = (ticket.custom_fields || []).find(cf => cf.id === AI_SEARCH_JIRA_FLAG_FIELD_ID);
+            return field ? field.value : null;
+        }
+
+        let jiraBaseUrl = null;
+
+        // The Jira issue key alone isn't clickable without the Atlassian site URL, which
+        // lives in the Zendesk JIRA app's installation settings. Fetched once per session.
+        async function loadJiraBaseUrl() {
+            if (jiraBaseUrl !== null) return jiraBaseUrl;
+            jiraBaseUrl = '';
+            try {
+                const zd = State.settings.zendesk;
+                const res = await zendeskFetch(`https://${zd.subdomain}.zendesk.com/api/v2/apps/installations.json`, { method: 'GET' });
+                if (res.ok) {
+                    const data = await res.json();
+                    const jira = (data.installations || []).find(i => i.settings && i.settings.jira_url);
+                    if (jira) jiraBaseUrl = String(jira.settings.jira_url).replace(/\/+$/, '');
+                }
+            } catch (err) {
+                console.error(err);
+            }
+            return jiraBaseUrl;
+        }
+
+        function renderAiSearchJiraCell(ticket) {
+            if (ticket.jiraKeys === undefined) return '<span style="color: var(--text-muted);">…</span>';
+
+            if (ticket.jiraKeys.length > 0) {
+                return ticket.jiraKeys.map(key => jiraBaseUrl
+                    ? `<a href="${jiraBaseUrl}/browse/${encodeURIComponent(key)}" target="_blank" rel="noopener">${escapeHtml(key)}</a>`
+                    : escapeHtml(key)
+                ).join(', ');
+            }
+
+            // No real link -- fall back to what the agent claimed, flagging the mismatch
+            // where they marked "yes" but nothing is actually linked.
+            const flag = getTicketJiraFlag(ticket);
+            if (flag === 'jira_yes') return `<span class="badge-shift" style="color: #f59e0b;" title="Agent marked this as Jira-linked, but no linked issue was found">marked yes</span>`;
+            if (flag === 'jira_no') return `<span style="color: var(--text-muted);">no</span>`;
+            return `<span style="color: var(--text-muted);">—</span>`;
+        }
+
+        // Zendesk's Jira links endpoint only accepts one ticket_id at a time (comma lists
+        // 422, ticket_id[] is ignored and returns everything), so this is one request per
+        // ticket. Run with a small pool and painted in progressively so a large result set
+        // shows up immediately instead of waiting on the whole sweep.
+        async function fetchAiSearchJiraLinks(tickets) {
+            const zd = State.settings.zendesk;
+            await loadJiraBaseUrl();
+
+            let cursor = 0;
+            const runOne = async () => {
+                while (cursor < tickets.length) {
+                    const ticket = tickets[cursor++];
+                    try {
+                        const target = `https://${zd.subdomain}.zendesk.com/api/services/jira/links.json?ticket_id=${ticket.id}`;
+                        const res = await zendeskFetch(target, { method: 'GET' });
+                        ticket.jiraKeys = res.ok
+                            ? [...new Set(((await res.json()).links || []).map(l => l.issue_key).filter(Boolean))]
+                            : [];
+                    } catch (err) {
+                        console.error(err);
+                        ticket.jiraKeys = [];
+                    }
+                    // Only repaint this one cell -- a full re-render would collapse any
+                    // summary rows the user has already expanded.
+                    const cell = document.getElementById(`ai-search-jira-${ticket.id}`);
+                    if (cell) cell.innerHTML = renderAiSearchJiraCell(ticket);
+                }
+            };
+
+            await Promise.all(Array.from({ length: Math.min(6, tickets.length) }, runOne));
+        }
+
+        let aiSearchSort = { key: 'created', dir: 'desc' };
+
+        const AI_SEARCH_STATUS_ORDER = ['new', 'open', 'pending', 'hold', 'solved', 'closed'];
+
+        function aiSearchSortValue(ticket, key) {
+            switch (key) {
+                case 'ticket': return Number(ticket.id) || 0;
+                case 'assignee': return (zendeskRequesterMap[ticket.assignee_id] || {}).name || '';
+                case 'status': {
+                    const idx = AI_SEARCH_STATUS_ORDER.indexOf(ticket.status);
+                    return idx === -1 ? AI_SEARCH_STATUS_ORDER.length : idx;
+                }
+                case 'jira': {
+                    if (ticket.jiraKeys && ticket.jiraKeys.length > 0) return ticket.jiraKeys.join(', ');
+                    // Sort unlinked below every real key, but keep "marked yes" (the
+                    // mismatches worth noticing) above a plain no.
+                    const flag = getTicketJiraFlag(ticket);
+                    return flag === 'jira_yes' ? 'zzz1' : 'zzz2';
+                }
+                case 'updated': return new Date(ticket.updated_at).getTime() || 0;
+                case 'created':
+                default: return new Date(ticket.created_at).getTime() || 0;
+            }
+        }
+
+        function sortAiSearchCache() {
+            const { key, dir } = aiSearchSort;
+            const factor = dir === 'asc' ? 1 : -1;
+            aiSearchCache.sort((a, b) => {
+                const av = aiSearchSortValue(a, key);
+                const bv = aiSearchSortValue(b, key);
+                if (typeof av === 'string' || typeof bv === 'string') {
+                    return String(av).localeCompare(String(bv)) * factor;
+                }
+                return (av - bv) * factor;
+            });
+        }
+
+        window.setAiSearchSort = function(key) {
+            if (aiSearchSort.key === key) {
+                aiSearchSort.dir = aiSearchSort.dir === 'asc' ? 'desc' : 'asc';
+            } else {
+                // Dates and ids are most useful newest-first; names and statuses A-Z.
+                aiSearchSort = { key, dir: (key === 'created' || key === 'updated' || key === 'ticket') ? 'desc' : 'asc' };
+            }
+            renderAiSearchTable();
+        };
+
+        function renderAiSearchSortIndicators() {
+            ['ticket', 'assignee', 'status', 'jira', 'created', 'updated'].forEach(key => {
+                const el = document.getElementById(`ai-sort-ind-${key}`);
+                if (el) el.innerText = aiSearchSort.key === key ? (aiSearchSort.dir === 'asc' ? '▲' : '▼') : '';
+            });
+        }
+
         function renderAiSearchTable() {
+            renderAiSearchSortIndicators();
             UI.tableAiSearch.innerHTML = '';
 
             if (aiSearchCache.length === 0) {
-                UI.tableAiSearch.innerHTML = `<tr><td colspan="6" style="text-align:center; color: var(--text-muted); padding: 2rem;">No matching tickets found.</td></tr>`;
+                UI.tableAiSearch.innerHTML = `<tr><td colspan="7" style="text-align:center; color: var(--text-muted); padding: 2rem;">No matching tickets found.</td></tr>`;
                 return;
             }
+
+            sortAiSearchCache();
 
             aiSearchCache.forEach(t => {
                 const requester = zendeskRequesterMap[t.requester_id] || { name: t.requester_id ? `Requester #${t.requester_id}` : 'Unknown', email: '' };
                 const assignee = zendeskRequesterMap[t.assignee_id] || { name: t.assignee_id ? `Agent #${t.assignee_id}` : 'Unassigned', email: '' };
                 const ticketUrl = `https://${State.settings.zendesk.subdomain}.zendesk.com/agent/tickets/${t.id}`;
-                const priority = t.priority || 'normal';
-                const createdDisplay = formatZendeskTimestamp(t.created_at);
 
                 UI.tableAiSearch.insertAdjacentHTML('beforeend', `
                     <tr id="ai-search-row-${t.id}">
@@ -4327,11 +4490,126 @@ Request: "${promptText}"`;
                         </td>
                         <td>${escapeHtml(assignee.name)}</td>
                         <td><span class="badge-shift">${escapeHtml(t.status || '')}</span></td>
-                        <td><span class="priority-badge priority-${escapeHtml(priority)}">${escapeHtml(priority)}</span></td>
-                        <td style="color: var(--text-muted);">${createdDisplay}</td>
+                        <td id="ai-search-jira-${t.id}">${renderAiSearchJiraCell(t)}</td>
+                        <td style="color: var(--text-muted);">${formatZendeskTimestampWithYear(t.created_at)}</td>
+                        <td style="color: var(--text-muted);">${formatZendeskTimestampWithYear(t.updated_at)}</td>
                     </tr>
                 `);
             });
+        }
+
+        // Shared by all three export formats so they can't drift apart.
+        function getAiSearchExportRows() {
+            return aiSearchCache.map(t => {
+                const requester = zendeskRequesterMap[t.requester_id] || { name: '', email: '' };
+                const assignee = zendeskRequesterMap[t.assignee_id] || { name: t.assignee_id ? `Agent #${t.assignee_id}` : 'Unassigned' };
+                let jira;
+                if (t.jiraKeys && t.jiraKeys.length > 0) {
+                    jira = t.jiraKeys.join(' ');
+                } else if (t.jiraKeys) {
+                    const flag = getTicketJiraFlag(t);
+                    jira = flag === 'jira_yes' ? 'marked yes (no link found)' : (flag === 'jira_no' ? 'no' : '—');
+                } else {
+                    jira = 'not loaded';
+                }
+                return [
+                    `#${t.id}`,
+                    t.subject || '(no subject)',
+                    requester.email || requester.name || '',
+                    assignee.name || '',
+                    t.status || '',
+                    jira,
+                    formatZendeskTimestampWithYear(t.created_at),
+                    formatZendeskTimestampWithYear(t.updated_at)
+                ];
+            });
+        }
+
+        const AI_SEARCH_EXPORT_HEADERS = ['Ticket', 'Subject', 'Requester', 'Assignee', 'Status', 'Jira', 'Created', 'Last Updated'];
+
+        function aiSearchExportReady() {
+            if (aiSearchCache.length === 0) {
+                notify('Nothing to export — run a search first.');
+                return false;
+            }
+            return true;
+        }
+
+        function exportAiSearchCsv() {
+            if (!aiSearchExportReady()) return;
+
+            const escapeCell = v => `"${String(v).replace(/"/g, '""')}"`;
+            const lines = [AI_SEARCH_EXPORT_HEADERS.map(escapeCell).join(',')];
+            getAiSearchExportRows().forEach(row => lines.push(row.map(escapeCell).join(',')));
+
+            // Built as a Blob rather than a data: URI (the pattern the older exports use)
+            // because ticket subjects are free text and routinely blow past the URI length
+            // limit once a few hundred rows are involved.
+            const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
+            triggerDownload(blob, `AI_Search_Results_${getLocalDateString()}.csv`);
+            notify('CSV exported.');
+        }
+
+        function exportAiSearchPdf() {
+            if (!aiSearchExportReady()) return;
+
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF({ orientation: 'landscape' });
+
+            doc.setFontSize(16);
+            doc.text('AI Search Results', 14, 15);
+            doc.setFontSize(9);
+            doc.setTextColor(100);
+            doc.text(`Prompt: ${UI.aiSearchPrompt.value.trim() || '(none)'}`, 14, 22);
+            doc.text(`Exported ${formatZendeskTimestampWithYear(new Date().toISOString())} — ${aiSearchCache.length} ticket(s)`, 14, 27);
+
+            doc.autoTable({
+                startY: 32,
+                head: [AI_SEARCH_EXPORT_HEADERS],
+                body: getAiSearchExportRows(),
+                theme: 'grid',
+                styles: { fontSize: 7, cellPadding: 2, overflow: 'linebreak' },
+                columnStyles: { 1: { cellWidth: 70 } },
+                headStyles: { fillColor: [79, 70, 229] }
+            });
+
+            doc.save(`AI_Search_Results_${getLocalDateString()}.pdf`);
+            notify('PDF exported.');
+        }
+
+        function exportAiSearchDoc() {
+            if (!aiSearchExportReady()) return;
+
+            // Word opens HTML saved as .doc -- avoids pulling in a real .docx library for
+            // what is essentially one table.
+            const headerHtml = AI_SEARCH_EXPORT_HEADERS.map(h => `<th style="background:#4f46e5; color:#fff; text-align:left; padding:6px; border:1px solid #999;">${escapeHtml(h)}</th>`).join('');
+            const bodyHtml = getAiSearchExportRows().map(row =>
+                `<tr>${row.map(cell => `<td style="padding:6px; border:1px solid #999; font-size:10pt;">${escapeHtml(String(cell))}</td>`).join('')}</tr>`
+            ).join('');
+
+            const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+<head><meta charset="utf-8"><title>AI Search Results</title></head>
+<body style="font-family: Calibri, Arial, sans-serif;">
+<h2>AI Search Results</h2>
+<p style="font-size:10pt; color:#555;">Prompt: ${escapeHtml(UI.aiSearchPrompt.value.trim() || '(none)')}<br>
+Exported ${escapeHtml(formatZendeskTimestampWithYear(new Date().toISOString()))} &mdash; ${aiSearchCache.length} ticket(s)</p>
+<table style="border-collapse:collapse; width:100%;"><thead><tr>${headerHtml}</tr></thead><tbody>${bodyHtml}</tbody></table>
+</body></html>`;
+
+            const blob = new Blob(['﻿' + html], { type: 'application/msword' });
+            triggerDownload(blob, `AI_Search_Results_${getLocalDateString()}.doc`);
+            notify('Word document exported.');
+        }
+
+        function triggerDownload(blob, filename) {
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.setAttribute('href', url);
+            link.setAttribute('download', filename);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
         }
 
         window.toggleAiSearchSummary = async function(ticketId) {
@@ -4344,7 +4622,7 @@ Request: "${promptText}"`;
 
             row.insertAdjacentHTML('afterend', `
                 <tr id="ai-search-detail-${ticketId}">
-                    <td colspan="6"><div class="summary-box">${escapeHtml(ticket.aiSummary || 'Summarizing…')}</div></td>
+                    <td colspan="7"><div class="summary-box">${escapeHtml(ticket.aiSummary || 'Summarizing…')}</div></td>
                 </tr>
             `);
             if (ticket.aiSummary) return;

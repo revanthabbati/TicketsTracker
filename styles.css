@@ -167,6 +167,11 @@ th { position: sticky; top: 0; background: var(--bg-panel); padding: 1rem 1.25re
 td { padding: 1rem 1.25rem; border-bottom: 1px solid var(--border-light); }
 tr:hover td { background: rgba(126, 34, 206, 0.05); }
 
+/* Sortable column headers (AI Search results) */
+th.ai-sort-th { cursor: pointer; user-select: none; white-space: nowrap; }
+th.ai-sort-th:hover { color: var(--text-main); }
+.ai-sort-ind { font-size: 0.7rem; color: var(--brand-blue); }
+
 /* --- MODALS --- */
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(5px); z-index: 10000; display: flex; align-items: center; justify-content: center; opacity: 0; pointer-events: none; transition: opacity 0.3s; }
 .modal-overlay.active { opacity: 1; pointer-events: auto; }
