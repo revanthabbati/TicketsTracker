@@ -639,15 +639,20 @@
                     <div class="view-header-flex" style="margin-bottom: 1.5rem;">
                         <div class="page-title">
                             <h1>AI Search</h1>
-                            <p>Ask a question in plain English to look up matching Zendesk tickets.</p>
+                            <p>Ask about your Zendesk tickets in plain English &mdash; look them up, or ask questions and get answers from them.</p>
                         </div>
                     </div>
 
                     <div class="panel">
+                        <div class="panel-header">
+                            <h2>Ask</h2>
+                            <button class="btn btn-outline" id="btn-ai-chat-new" style="padding: 0.4rem 1rem; font-size: 0.8rem;">New chat</button>
+                        </div>
                         <div class="panel-body">
+                            <div id="ai-chat-transcript" class="ai-chat-transcript"></div>
                             <div style="display:flex; gap:0.75rem; align-items:flex-start; flex-wrap: wrap;">
-                                <textarea id="ai-search-prompt" class="input-control" rows="2" style="flex: 1; min-width: 280px; resize: vertical;" placeholder="e.g. open and on-hold tickets from requester jane@acme.com, or tickets mentioning activation code ABC123"></textarea>
-                                <button class="btn btn-primary" id="btn-ai-search" style="padding: 0.6rem 1.5rem;">Search</button>
+                                <textarea id="ai-search-prompt" class="input-control" rows="2" style="flex: 1; min-width: 280px; resize: vertical;" placeholder="e.g. open and on-hold tickets from jane@acme.com &nbsp;·&nbsp; how many tickets did we solve last week? &nbsp;·&nbsp; what was the resolution on the DSI timeout tickets?"></textarea>
+                                <button class="btn btn-primary" id="btn-ai-search" style="padding: 0.6rem 1.5rem;">Send</button>
                             </div>
                             <div style="margin-top: 0.6rem; font-size: 0.8rem; color: var(--text-muted);">
                                 <span id="ai-search-status"></span>
@@ -680,7 +685,7 @@
                                         </tr>
                                     </thead>
                                     <tbody id="table-ai-search">
-                                        <tr><td colspan="7" style="text-align:center; color: var(--text-muted); padding: 2rem;">Type a prompt above and click Search.</td></tr>
+                                        <tr><td colspan="7" style="text-align:center; color: var(--text-muted); padding: 2rem;">Ask a question above to get started.</td></tr>
                                     </tbody>
                                 </table>
                             </div>
@@ -1387,6 +1392,8 @@
             // AI Search
             aiSearchPrompt: document.getElementById('ai-search-prompt'),
             btnAiSearch: document.getElementById('btn-ai-search'),
+            aiChatTranscript: document.getElementById('ai-chat-transcript'),
+            btnAiChatNew: document.getElementById('btn-ai-chat-new'),
             aiSearchStatus: document.getElementById('ai-search-status'),
             aiSearchInterpreted: document.getElementById('ai-search-interpreted'),
             tableAiSearch: document.getElementById('table-ai-search'),
@@ -1639,7 +1646,15 @@
             UI.csatEnd.addEventListener('change', fetchCsatData);
             UI.btnRefreshCsat.addEventListener('click', fetchCsatData);
 
-            UI.btnAiSearch.addEventListener('click', runAiSearch);
+            UI.btnAiSearch.addEventListener('click', sendAiChatMessage);
+            UI.btnAiChatNew.addEventListener('click', resetAiChat);
+            UI.aiSearchPrompt.addEventListener('keydown', (e) => {
+                // Enter sends, Shift+Enter newlines -- standard chat composer behaviour.
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    sendAiChatMessage();
+                }
+            });
             UI.btnAiSearchExportCsv.addEventListener('click', exportAiSearchCsv);
             UI.btnAiSearchExportPdf.addEventListener('click', exportAiSearchPdf);
             UI.btnAiSearchExportDoc.addEventListener('click', exportAiSearchDoc);
@@ -4175,17 +4190,74 @@
         };
 
         let aiSearchCache = [];
+        let aiChatHistory = [];
 
-        // Zendesk search can't OR multiple values of the same field in one query, so the
-        // AI is asked to return one query string per value instead (e.g. "open and on-hold"
-        // becomes two queries, status:open and status:hold) -- results get merged below.
-        async function translateAiSearchPrompt(promptText) {
+        // Only the tail of the conversation is sent to the model -- enough for follow-ups
+        // to make sense without the prompt growing without bound.
+        const AI_CHAT_HISTORY_LIMIT = 12;
+        // Caps on what goes into the answering prompt. gemini-2.0-flash has a 1M-token
+        // window so these are about latency and not shipping more ticket content to Google
+        // than a question actually needs, rather than about fitting.
+        const AI_ANSWER_MAX_TICKETS = 40;
+        const AI_ANSWER_DESC_CHARS = 1200;
+        const AI_ANSWER_COMMENT_CHARS = 6000;
+        const AI_COMMENT_FETCH_LIMIT = 25;
+
+        // Long threads get their middle dropped rather than their tail: the resolution is
+        // almost always the last thing said, so a plain slice() from the front would cut
+        // off the very part a "what was the resolution?" question is asking about.
+        function trimCommentThread(text) {
+            if (!text || text.length <= AI_ANSWER_COMMENT_CHARS) return text;
+            const head = Math.round(AI_ANSWER_COMMENT_CHARS * 0.3);
+            const tail = AI_ANSWER_COMMENT_CHARS - head;
+            return `${text.slice(0, head)}\n\n[... middle of this conversation omitted ...]\n\n${text.slice(-tail)}`;
+        }
+
+        async function callGemini(promptText) {
             const ai = State.settings.ai;
             const model = ai.model || 'gemini-2.0-flash';
+            const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${ai.apiKey}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ contents: [{ parts: [{ text: promptText }] }] })
+            });
+            if (!res.ok) throw new Error(`Gemini returned ${res.status}`);
+            const data = await res.json();
+            const text = data.candidates && data.candidates[0] && data.candidates[0].content
+                && data.candidates[0].content.parts && data.candidates[0].content.parts[0]
+                && data.candidates[0].content.parts[0].text;
+            if (!text) throw new Error('AI returned no text.');
+            return text;
+        }
+
+        function parseGeminiJson(text) {
+            // Gemini sometimes wraps JSON in ```json fences despite being told not to.
+            const cleaned = text.trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
+            try {
+                return JSON.parse(cleaned);
+            } catch (e) {
+                throw new Error(`AI returned invalid JSON: ${cleaned.slice(0, 200)}`);
+            }
+        }
+
+        function aiChatHistoryText() {
+            if (aiChatHistory.length === 0) return '(this is the first message)';
+            return aiChatHistory.slice(-AI_CHAT_HISTORY_LIMIT)
+                .map(m => `${m.role === 'user' ? 'Agent' : 'You'}: ${m.text}`)
+                .join('\n');
+        }
+
+        // First of the two calls per turn: decide whether this message needs a fresh
+        // Zendesk search, can be answered from the tickets already loaded, or is just a
+        // count -- and whether answering it needs the comment threads.
+        async function planAiChatTurn(message) {
             const today = new Date();
             const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+            const loaded = aiSearchCache.length > 0
+                ? `${aiSearchCache.length} ticket(s) are currently loaded from the previous turn: ${aiSearchCache.slice(0, 40).map(t => '#' + t.id).join(', ')}`
+                : 'No tickets are currently loaded.';
 
-            const instructions = `You translate a support agent's plain-English request into one or more Zendesk Search API query strings.
+            const instructions = `You are the planner for a support agent's Zendesk assistant. Decide how to handle their latest message.
 
 Available Zendesk search syntax:
 - type:ticket (always include this in every query)
@@ -4196,43 +4268,124 @@ Available Zendesk search syntax:
 - tags:<tag>
 - subject:<word>  description:<word>
 - date filters: created / updated / solved followed by >, <, >=, or <= and a date in YYYY-MM-DD format
-- custom_field_${AI_SEARCH_JIRA_FLAG_FIELD_ID}:jira_yes / :jira_no -- whether an agent marked the ticket as having a linked Jira issue (use this for requests like "tickets with a Jira linked")
+- custom_field_${AI_SEARCH_JIRA_FLAG_FIELD_ID}:jira_yes / :jira_no -- whether an agent marked the ticket as having a linked Jira issue
 
 Today's date is ${todayStr} -- resolve relative dates ("today", "this week", "last month") against it.
 
-Any word in the request that isn't a field above (e.g. an activation code, order number, or product name) should be included as a bare keyword, which Zendesk full-text searches across ticket subject/description/comments.
+Any word that isn't one of the fields above (an activation code, order number, product name) goes in as a bare keyword, which Zendesk full-text searches across subject/description/comments.
 
-Zendesk search cannot OR multiple values of the same field within one query string. If the request needs more than one value for the same field (e.g. "open and on-hold tickets"), return a SEPARATE query string per value -- the caller merges the results.
+Zendesk search cannot OR multiple values of the same field in one query string. If more than one value of the same field is needed (e.g. "open and on-hold"), return a SEPARATE query per value -- the caller merges and dedupes them.
 
-Respond with ONLY strict JSON, no markdown code fences, no commentary, in exactly this shape:
-{"queries": ["type:ticket status:open requester:jane@acme.com", "type:ticket status:hold requester:jane@acme.com"]}
+Conversation so far:
+${aiChatHistoryText()}
 
-Request: "${promptText}"`;
+${loaded}
 
-            const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${ai.apiKey}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ contents: [{ parts: [{ text: instructions }] }] })
-            });
-            if (!res.ok) throw new Error(`Gemini returned ${res.status}`);
-            const data = await res.json();
-            const text = data.candidates && data.candidates[0] && data.candidates[0].content
-                && data.candidates[0].content.parts && data.candidates[0].content.parts[0]
-                && data.candidates[0].content.parts[0].text;
-            if (!text) throw new Error('AI returned no text.');
+Latest message: "${message}"
 
-            // Gemini sometimes wraps JSON in ```json fences despite being told not to.
-            const cleaned = text.trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
-            let parsed;
-            try {
-                parsed = JSON.parse(cleaned);
-            } catch (e) {
-                throw new Error(`AI returned invalid JSON: ${cleaned.slice(0, 200)}`);
-            }
-            if (!parsed.queries || !Array.isArray(parsed.queries) || parsed.queries.length === 0) {
+Decide:
+- "action": "search" to run new Zendesk queries, or "reuse" if the message is a follow-up about the already-loaded tickets (e.g. "which of those is oldest?", "summarise the third one") and needs no new data. Use "search" if no tickets are loaded.
+- "queries": the query strings to run. Required when action is "search", otherwise [].
+- "countOnly": true if the message only asks how many (a number answers it fully). The caller then reads Zendesk's result count without downloading every ticket, so this works for very large sets.
+- "listOnly": true if the agent just wants to see the matching tickets listed, with no question to answer in prose.
+- "needsComments": true only if answering genuinely needs what was said inside the tickets (resolutions, what an agent replied, root cause). False for questions answerable from subject, status, assignee, dates, or counts. Fetching comments is slow, so don't set it unless it's needed.
+
+Respond with ONLY strict JSON, no markdown fences, no commentary:
+{"action":"search","queries":["type:ticket status:open requester:jane@acme.com"],"countOnly":false,"listOnly":false,"needsComments":false}`;
+
+            const parsed = parseGeminiJson(await callGemini(instructions));
+            const plan = {
+                action: parsed.action === 'reuse' ? 'reuse' : 'search',
+                queries: Array.isArray(parsed.queries) ? parsed.queries.filter(q => typeof q === 'string' && q.trim()) : [],
+                countOnly: !!parsed.countOnly,
+                listOnly: !!parsed.listOnly,
+                needsComments: !!parsed.needsComments
+            };
+            // "reuse" with nothing loaded would answer from an empty context, so fall back
+            // to searching. Likewise a "search" with no queries is unusable.
+            if (plan.action === 'reuse' && aiSearchCache.length === 0) plan.action = 'search';
+            if (plan.action === 'search' && plan.queries.length === 0) {
                 throw new Error('AI did not return any search queries.');
             }
-            return parsed.queries;
+            return plan;
+        }
+
+        // Second of the two calls: answer the question from the retrieved tickets.
+        async function answerAiChatQuestion(message, tickets, extraContext) {
+            const included = tickets.slice(0, AI_ANSWER_MAX_TICKETS);
+            const ticketBlocks = included.map(t => {
+                const requester = zendeskRequesterMap[t.requester_id] || {};
+                const assignee = zendeskRequesterMap[t.assignee_id] || {};
+                const lines = [
+                    `Ticket #${t.id}`,
+                    `Subject: ${t.subject || '(none)'}`,
+                    `Status: ${t.status || '?'} | Priority: ${t.priority || '?'}`,
+                    `Requester: ${requester.name || '?'}${requester.email ? ` <${requester.email}>` : ''}`,
+                    `Assignee: ${assignee.name || 'Unassigned'}`,
+                    `Created: ${t.created_at} | Last updated: ${t.updated_at}`,
+                ];
+                if (t.jiraKeys && t.jiraKeys.length) lines.push(`Linked Jira: ${t.jiraKeys.join(', ')}`);
+                lines.push(`Description: ${(t.description || '(none)').slice(0, AI_ANSWER_DESC_CHARS)}`);
+                if (t.commentText) lines.push(`Conversation:\n${trimCommentThread(t.commentText)}`);
+                return lines.join('\n');
+            }).join('\n\n---\n\n');
+
+            const instructions = `You are a Zendesk assistant for a support team. Answer the agent's question using only the ticket data below. If the data doesn't contain the answer, say so plainly rather than guessing.
+
+Be concise and factual. Reference tickets by their number in the form #123456 so the agent can cross-reference the results table. Use short bullet lines when listing several things. Do not invent ticket numbers, dates, or names.
+
+Conversation so far:
+${aiChatHistoryText()}
+
+${extraContext ? extraContext + '\n\n' : ''}Ticket data (${included.length}${tickets.length > included.length ? ` of ${tickets.length} matched` : ''} ticket(s)):
+${ticketBlocks || '(no tickets matched)'}
+
+Agent's question: "${message}"`;
+
+            return (await callGemini(instructions)).trim();
+        }
+
+        // Comment threads, only pulled when the planner says the question needs them.
+        // Same pool-of-6 shape as fetchAiSearchJiraLinks, and cached per ticket so a
+        // follow-up about the same set doesn't refetch.
+        async function fetchAiSearchComments(tickets) {
+            const zd = State.settings.zendesk;
+            const pending = tickets.slice(0, AI_COMMENT_FETCH_LIMIT).filter(t => t.commentText === undefined);
+            if (pending.length === 0) return;
+
+            let cursor = 0;
+            const runOne = async () => {
+                while (cursor < pending.length) {
+                    const ticket = pending[cursor++];
+                    try {
+                        const target = `https://${zd.subdomain}.zendesk.com/api/v2/tickets/${ticket.id}/comments.json`;
+                        const res = await zendeskFetch(target, { method: 'GET' });
+                        if (!res.ok) { ticket.commentText = ''; continue; }
+                        const data = await res.json();
+                        ticket.commentText = (data.comments || []).map(c => {
+                            const who = (zendeskRequesterMap[c.author_id] || {}).name || `User ${c.author_id}`;
+                            const visibility = c.public ? 'public reply' : 'internal note';
+                            return `[${formatZendeskTimestampWithYear(c.created_at)} — ${who}, ${visibility}]\n${(c.plain_body || c.body || '').trim()}`;
+                        }).join('\n\n');
+                    } catch (err) {
+                        console.error(err);
+                        ticket.commentText = '';
+                    }
+                }
+            };
+            await Promise.all(Array.from({ length: Math.min(6, pending.length) }, runOne));
+        }
+
+        // Cheap path for "how many..." questions: Zendesk's search response carries a
+        // count, so there's no need to page through (or cap) the actual tickets.
+        async function fetchAiSearchCounts(zd, queries) {
+            return Promise.all(queries.map(async q => {
+                const target = `https://${zd.subdomain}.zendesk.com/api/v2/search.json?query=${encodeURIComponent(q)}`;
+                const res = await zendeskFetch(target, { method: 'GET' });
+                if (!res.ok) throw new Error(`Zendesk returned ${res.status}`);
+                const data = await res.json();
+                return { query: q, count: data.count || 0 };
+            }));
         }
 
         // Capped variant of searchZendeskTickets -- an overly-broad AI-generated query
@@ -4254,63 +4407,178 @@ Request: "${promptText}"`;
             return { results, truncated: !!target };
         }
 
-        async function runAiSearch() {
-            const promptText = UI.aiSearchPrompt.value.trim();
-            if (!promptText) {
-                notify('Type a prompt first.');
+        // Escaped first, then formatted -- the model echoes back ticket content, so
+        // formatting raw text before escaping would let ticket text inject markup.
+        function formatAiChatText(text) {
+            const escaped = escapeHtml(text);
+            const withRefs = escaped.replace(/#(\d{5,})/g, (m, id) => {
+                const zd = State.settings.zendesk;
+                if (!zd || !zd.subdomain) return m;
+                return `<a href="https://${zd.subdomain}.zendesk.com/agent/tickets/${id}" target="_blank" rel="noopener">#${id}</a>`;
+            });
+            const bolded = withRefs.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+
+            // Group runs of "- " / "* " lines into real lists; leave everything else as
+            // plain lines (the container is white-space: pre-wrap).
+            const out = [];
+            let bullets = null;
+            bolded.split('\n').forEach(line => {
+                const m = line.match(/^\s*[-*]\s+(.*)$/);
+                if (m) {
+                    (bullets = bullets || []).push(`<li>${m[1]}</li>`);
+                } else {
+                    if (bullets) { out.push(`<ul>${bullets.join('')}</ul>`); bullets = null; }
+                    out.push(line);
+                }
+            });
+            if (bullets) out.push(`<ul>${bullets.join('')}</ul>`);
+            return out.join('\n');
+        }
+
+        function appendAiChatBubble(role, text) {
+            const cls = role === 'user' ? 'ai-chat-user' : (role === 'note' ? 'ai-chat-note' : 'ai-chat-assistant');
+            const html = role === 'assistant' ? formatAiChatText(text) : escapeHtml(text);
+            UI.aiChatTranscript.insertAdjacentHTML('beforeend', `<div class="ai-chat-msg ${cls}">${html}</div>`);
+            UI.aiChatTranscript.scrollTop = UI.aiChatTranscript.scrollHeight;
+        }
+
+        function setAiChatThinking(label) {
+            let el = document.getElementById('ai-chat-thinking');
+            if (!label) { if (el) el.remove(); return; }
+            if (!el) {
+                UI.aiChatTranscript.insertAdjacentHTML('beforeend', `<div id="ai-chat-thinking" class="ai-chat-thinking"></div>`);
+                el = document.getElementById('ai-chat-thinking');
+            }
+            el.innerText = label;
+            UI.aiChatTranscript.scrollTop = UI.aiChatTranscript.scrollHeight;
+        }
+
+        function resetAiChat() {
+            aiChatHistory = [];
+            aiSearchCache = [];
+            UI.aiChatTranscript.innerHTML = '';
+            UI.aiSearchStatus.innerText = '';
+            UI.aiSearchInterpreted.innerText = '';
+            UI.tableAiSearch.innerHTML = `<tr><td colspan="7" style="text-align:center; color: var(--text-muted); padding: 2rem;">Ask a question above to get started.</td></tr>`;
+        }
+
+        async function sendAiChatMessage() {
+            const message = UI.aiSearchPrompt.value.trim();
+            if (!message) {
+                notify('Type a question first.');
                 return;
             }
 
             const zd = State.settings.zendesk;
             if (!zd || !zd.subdomain || !zd.email || !zd.apiToken || !zd.proxyUrl) {
-                UI.tableAiSearch.innerHTML = `<tr><td colspan="7" style="text-align:center; color: var(--text-muted); padding: 2rem;">Configure Zendesk in <a href="admin.html">admin.html</a> first.</td></tr>`;
+                notify('Configure Zendesk in admin.html first.');
                 return;
             }
             const ai = State.settings.ai;
             if (!ai || !ai.apiKey) {
-                UI.tableAiSearch.innerHTML = `<tr><td colspan="7" style="text-align:center; color: var(--text-muted); padding: 2rem;">No AI API key configured. Set one up in admin.html.</td></tr>`;
+                notify('No AI API key configured. Set one up in admin.html.');
                 return;
             }
 
             UI.btnAiSearch.disabled = true;
-            UI.aiSearchStatus.innerText = 'Thinking…';
+            UI.aiSearchPrompt.value = '';
+            appendAiChatBubble('user', message);
             UI.aiSearchInterpreted.innerText = '';
-            UI.tableAiSearch.innerHTML = `<tr><td colspan="7" style="text-align:center; color: var(--text-muted); padding: 2rem;">Working…</td></tr>`;
+            UI.aiSearchStatus.innerText = '';
 
             try {
-                const queries = await translateAiSearchPrompt(promptText);
-                UI.aiSearchInterpreted.innerText = ` — Interpreted as: ${queries.join('  |  ')}`;
-                UI.aiSearchStatus.innerText = 'Searching Zendesk…';
+                setAiChatThinking('Thinking…');
+                const plan = await planAiChatTurn(message);
 
-                const searchResults = await Promise.all(queries.map(q => searchZendeskTicketsCapped(zd, q)));
-                const truncated = searchResults.some(r => r.truncated);
-                const byId = new Map();
-                searchResults.forEach(r => r.results.forEach(t => { if (t.id != null) byId.set(t.id, t); }));
-                const tickets = [...byId.values()].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-
-                const ids = [...new Set(tickets.flatMap(t => [t.requester_id, t.assignee_id]).filter(Boolean))]
-                    .filter(id => !(id in zendeskRequesterMap));
-                if (ids.length > 0) {
-                    const target = `https://${zd.subdomain}.zendesk.com/api/v2/users/show_many.json?ids=${ids.join(',')}`;
-                    const res = await zendeskFetch(target, { method: 'GET' });
-                    if (res.ok) {
-                        const data = await res.json();
-                        (data.users || []).forEach(u => { zendeskRequesterMap[u.id] = { name: u.name, email: u.email || '' }; });
-                    }
+                if (plan.action === 'search') {
+                    UI.aiSearchInterpreted.innerText = ` — Interpreted as: ${plan.queries.join('  |  ')}`;
                 }
 
-                aiSearchCache = tickets;
-                renderAiSearchTable();
-                UI.aiSearchStatus.innerText = `${tickets.length} ticket${tickets.length === 1 ? '' : 's'} found${truncated ? ' (truncated — refine your prompt for more)' : ''}`;
+                // "How many" questions are answered straight from Zendesk's result count,
+                // which stays accurate past the display cap that a full fetch would hit.
+                if (plan.action === 'search' && plan.countOnly) {
+                    setAiChatThinking('Counting in Zendesk…');
+                    const counts = await fetchAiSearchCounts(zd, plan.queries);
+                    const total = counts.reduce((sum, c) => sum + c.count, 0);
+                    const breakdown = counts.length > 1
+                        ? '\n' + counts.map(c => `- ${c.count} for \`${c.query}\``).join('\n')
+                        : '';
+                    setAiChatThinking('Writing an answer…');
+                    const answer = await answerAiChatQuestion(message, [],
+                        `Zendesk reported these result counts:\n${counts.map(c => `- ${c.count} ticket(s) matching ${c.query}`).join('\n')}\nCombined total across queries (may double-count a ticket matching more than one): ${total}.`);
+                    setAiChatThinking(null);
+                    aiChatHistory.push({ role: 'user', text: message });
+                    aiChatHistory.push({ role: 'assistant', text: answer });
+                    appendAiChatBubble('assistant', answer);
+                    UI.aiSearchStatus.innerText = `Counted in Zendesk${breakdown ? '' : ` — ${total} ticket(s)`}`;
+                    return;
+                }
 
-                // Not awaited: the table is already usable, and Jira links are one request
-                // per ticket, so they fill in behind the rendered rows.
-                fetchAiSearchJiraLinks(tickets).catch(err => console.error(err));
+                let truncated = false;
+                if (plan.action === 'search') {
+                    setAiChatThinking('Searching Zendesk…');
+                    const searchResults = await Promise.all(plan.queries.map(q => searchZendeskTicketsCapped(zd, q)));
+                    truncated = searchResults.some(r => r.truncated);
+                    const byId = new Map();
+                    searchResults.forEach(r => r.results.forEach(t => { if (t.id != null) byId.set(t.id, t); }));
+                    const tickets = [...byId.values()].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+                    const ids = [...new Set(tickets.flatMap(t => [t.requester_id, t.assignee_id]).filter(Boolean))]
+                        .filter(id => !(id in zendeskRequesterMap));
+                    if (ids.length > 0) {
+                        const target = `https://${zd.subdomain}.zendesk.com/api/v2/users/show_many.json?ids=${ids.join(',')}`;
+                        const res = await zendeskFetch(target, { method: 'GET' });
+                        if (res.ok) {
+                            const data = await res.json();
+                            (data.users || []).forEach(u => { zendeskRequesterMap[u.id] = { name: u.name, email: u.email || '' }; });
+                        }
+                    }
+
+                    aiSearchCache = tickets;
+                    renderAiSearchTable();
+                    UI.aiSearchStatus.innerText = `${tickets.length} ticket${tickets.length === 1 ? '' : 's'} found${truncated ? ' (truncated — narrow the question for more)' : ''}`;
+
+                    // Not awaited: the table is already usable, and Jira links are one
+                    // request per ticket, so they fill in behind the rendered rows.
+                    fetchAiSearchJiraLinks(tickets).catch(err => console.error(err));
+                }
+
+                if (plan.listOnly) {
+                    setAiChatThinking(null);
+                    const count = aiSearchCache.length;
+                    const answer = count === 0
+                        ? 'No tickets matched that.'
+                        : `Found ${count} ticket${count === 1 ? '' : 's'} — listed in the results table below${truncated ? ' (capped; narrow the question to see more)' : ''}.`;
+                    aiChatHistory.push({ role: 'user', text: message });
+                    aiChatHistory.push({ role: 'assistant', text: answer });
+                    appendAiChatBubble('assistant', answer);
+                    return;
+                }
+
+                if (plan.needsComments && aiSearchCache.length > 0) {
+                    const n = Math.min(aiSearchCache.length, AI_COMMENT_FETCH_LIMIT);
+                    setAiChatThinking(`Reading ${n} ticket conversation${n === 1 ? '' : 's'}…`);
+                    await fetchAiSearchComments(aiSearchCache);
+                }
+
+                setAiChatThinking('Writing an answer…');
+                const answer = await answerAiChatQuestion(message, aiSearchCache);
+                setAiChatThinking(null);
+
+                aiChatHistory.push({ role: 'user', text: message });
+                aiChatHistory.push({ role: 'assistant', text: answer });
+                appendAiChatBubble('assistant', answer);
+
+                // Be explicit when the answer only saw part of the match set, rather than
+                // letting it read as though it covered everything.
+                if (aiSearchCache.length > AI_ANSWER_MAX_TICKETS) {
+                    appendAiChatBubble('note', `Answered from the ${AI_ANSWER_MAX_TICKETS} most recent of ${aiSearchCache.length} matching tickets.`);
+                }
             } catch (err) {
                 console.error(err);
-                UI.aiSearchStatus.innerText = '';
-                UI.tableAiSearch.innerHTML = `<tr><td colspan="7" style="text-align:center; color: #f43f5e; padding: 2rem;">Couldn't run the search — check the console.</td></tr>`;
-                notify("AI Search failed — check the console.");
+                setAiChatThinking(null);
+                appendAiChatBubble('note', `Something went wrong: ${err.message}`);
+                notify('AI Search failed — check the console.');
             } finally {
                 UI.btnAiSearch.disabled = false;
             }
