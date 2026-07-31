@@ -4202,6 +4202,10 @@
         const AI_ANSWER_DESC_CHARS = 1200;
         const AI_ANSWER_COMMENT_CHARS = 6000;
         const AI_COMMENT_FETCH_LIMIT = 25;
+        // Up to this many, a "how many" question also fetches and lists the tickets rather
+        // than replying with a bare number. Matches searchZendeskTicketsCapped's own ceiling
+        // (3 pages x 100), so anything under it is fetchable in one pass per query anyway.
+        const AI_COUNT_LIST_THRESHOLD = 300;
 
         // The customer-account dropdown on tickets, whose values are lowercase hyphenated
         // slugs (city-furniture, siteone, amwest). Needed because agents refer to customers
@@ -4372,8 +4376,9 @@ Be concise and factual. Reference tickets by their number in the form #123456 so
 Conversation so far:
 ${aiChatHistoryText()}
 
-${extraContext ? extraContext + '\n\n' : ''}Ticket data (${included.length}${tickets.length > included.length ? ` of ${tickets.length} matched` : ''} ticket(s)):
-${ticketBlocks || '(no tickets matched)'}
+${extraContext ? extraContext + '\n\n' : ''}${included.length > 0
+    ? `Ticket data (${included.length}${tickets.length > included.length ? ` of ${tickets.length} matched` : ''} ticket(s)):\n${ticketBlocks}`
+    : 'No individual ticket records were loaded for this question. Answer from the figures above -- they are the complete answer, so do not say the data is missing or that details are unavailable.'}
 
 Agent's question: "${message}"`;
 
@@ -4535,25 +4540,36 @@ Agent's question: "${message}"`;
                     UI.aiSearchInterpreted.innerText = ` — Interpreted as: ${plan.queries.join('  |  ')}`;
                 }
 
-                // "How many" questions are answered straight from Zendesk's result count,
-                // which stays accurate past the display cap that a full fetch would hit.
+                // "How many" questions get their number from Zendesk's result count, which
+                // stays accurate past the cap a full fetch would hit. But asking "how many"
+                // and being told only a bare number is annoying -- you almost always want to
+                // see them too -- so when the count is small enough to display we go on and
+                // fetch the tickets as well, and only answer from the bare count when the
+                // set is genuinely too big to list.
+                let countContext = null;
                 if (plan.action === 'search' && plan.countOnly) {
                     setAiChatThinking('Counting in Zendesk…');
                     const counts = await fetchAiSearchCounts(zd, plan.queries);
                     const total = counts.reduce((sum, c) => sum + c.count, 0);
-                    const breakdown = counts.length > 1
-                        ? '\n' + counts.map(c => `- ${c.count} for \`${c.query}\``).join('\n')
-                        : '';
-                    setAiChatThinking('Writing an answer…');
-                    const answer = await answerAiChatQuestion(message, [],
-                        `Zendesk reported these result counts:\n${counts.map(c => `- ${c.count} ticket(s) matching ${c.query}`).join('\n')}\nCombined total across queries (may double-count a ticket matching more than one): ${total}.` +
-                        (total === 0 ? `\nEverything came back zero. Say so, quote the filters that were used, and note that a name, email or account in them may not match what Zendesk holds -- do not present zero as a confident finding.` : ''));
-                    setAiChatThinking(null);
-                    aiChatHistory.push({ role: 'user', text: message });
-                    aiChatHistory.push({ role: 'assistant', text: answer });
-                    appendAiChatBubble('assistant', answer);
-                    UI.aiSearchStatus.innerText = `Counted in Zendesk${breakdown ? '' : ` — ${total} ticket(s)`}`;
-                    return;
+                    countContext = `Zendesk reported these result counts, which are authoritative for "how many" (more reliable than counting the ticket records below, which are capped and deduplicated):\n${counts.map(c => `- ${c.count} ticket(s) matching ${c.query}`).join('\n')}\nCombined total across queries (may double-count a ticket matching more than one): ${total}.`;
+
+                    if (total === 0 || total > AI_COUNT_LIST_THRESHOLD) {
+                        if (total > AI_COUNT_LIST_THRESHOLD) {
+                            countContext += `\nThat is too many to list, so no individual tickets were loaded. Give the number and say the set is too large to list.`;
+                        } else {
+                            countContext += `\nEverything came back zero. Say so, quote the filters that were used, and note that a name, email or account in them may not match what Zendesk holds -- do not present zero as a confident finding.`;
+                        }
+                        setAiChatThinking('Writing an answer…');
+                        const answer = await answerAiChatQuestion(message, [], countContext);
+                        setAiChatThinking(null);
+                        aiChatHistory.push({ role: 'user', text: message });
+                        aiChatHistory.push({ role: 'assistant', text: answer });
+                        appendAiChatBubble('assistant', answer);
+                        UI.aiSearchStatus.innerText = `Counted in Zendesk — ${total} ticket(s)`;
+                        return;
+                    }
+                    // Small enough to show: fall through to the normal search path so the
+                    // results table fills in and the answer can name the tickets.
                 }
 
                 let truncated = false;
@@ -4625,7 +4641,7 @@ Agent's question: "${message}"`;
                 }
 
                 setAiChatThinking('Writing an answer…');
-                const answer = await answerAiChatQuestion(message, aiSearchCache);
+                const answer = await answerAiChatQuestion(message, aiSearchCache, countContext);
                 setAiChatThinking(null);
 
                 aiChatHistory.push({ role: 'user', text: message });
