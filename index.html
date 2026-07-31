@@ -4535,6 +4535,10 @@ Agent's question: "${message}"`;
             try {
                 setAiChatThinking('Thinking…');
                 const plan = await planAiChatTurn(message);
+                // Logged so a wrong answer can be diagnosed from the console afterwards --
+                // nearly every AI Search bug so far has been the planner misreading the
+                // question, which is invisible from the answer alone.
+                console.debug('AI Search plan:', JSON.stringify(plan));
 
                 if (plan.action === 'search') {
                     UI.aiSearchInterpreted.innerText = ` — Interpreted as: ${plan.queries.join('  |  ')}`;
