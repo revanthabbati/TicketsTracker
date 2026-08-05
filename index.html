@@ -291,7 +291,12 @@
                                 <input type="date" id="filter-date-start" class="input-control" style="padding: 0.4rem 1rem; width: auto; font-weight: 500;">
                                 <span style="color: var(--text-muted); font-size: 0.85rem; font-weight: 500;">to</span>
                                 <input type="date" id="filter-date-end" class="input-control" style="padding: 0.4rem 1rem; width: auto; font-weight: 500;">
-                                
+                                <select id="filter-reassigned" class="input-control" style="padding: 0.4rem 1rem; width: auto; font-weight: 500;">
+                                    <option value="">All Tickets</option>
+                                    <option value="yes">Reassigned Only</option>
+                                    <option value="no">Never Reassigned</option>
+                                </select>
+
                                 <div class="data-controls" style="margin-left: auto;">
                                     <button class="btn btn-outline" id="btn-export-csv" style="padding: 0.4rem 1rem; font-size: 0.8rem;">Export CSV</button>
                                     <button class="btn btn-outline" id="btn-export-pdf" style="padding: 0.4rem 1rem; font-size: 0.8rem;">Export PDF</button>
@@ -305,6 +310,7 @@
                                 <thead>
                                     <tr>
                                         <th>Assignee</th>
+                                        <th>Assigned By</th>
                                         <th>Ticket Reference</th>
                                         <th>Source</th>
                                         <th>Date</th>
@@ -523,7 +529,7 @@
                     <div style="display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap;">
                         <button type="button" class="btn btn-primary" id="tab-zendesk-unassigned" style="padding: 0.6rem 1.25rem;" onclick="window.switchZendeskTab('unassigned')">Unassigned</button>
                         <button type="button" class="btn btn-outline" id="tab-zendesk-suspended" style="padding: 0.6rem 1.25rem;" onclick="window.switchZendeskTab('suspended')">Suspended</button>
-                        <button type="button" class="btn btn-outline" id="tab-zendesk-offline" style="padding: 0.6rem 1.25rem;" onclick="window.switchZendeskTab('offline')">Offline Agents</button>
+                        <button type="button" class="btn btn-outline" id="tab-zendesk-offline" style="padding: 0.6rem 1.25rem;" onclick="window.switchZendeskTab('offline')">Offline Agents Tickets</button>
                     </div>
 
                     <div id="zendesk-unassigned-panel" class="panel">
@@ -1361,6 +1367,7 @@
             filterAgent: document.getElementById('filter-agent'),
             filterDateStart: document.getElementById('filter-date-start'),
             filterDateEnd: document.getElementById('filter-date-end'),
+            filterReassigned: document.getElementById('filter-reassigned'),
             tableHistory: document.getElementById('table-history'),
             
             // Export / Import
@@ -1640,6 +1647,7 @@
             UI.filterAgent.addEventListener('change', () => { historyDrillRange = null; renderHistoryTable(); });
             UI.filterDateStart.addEventListener('change', () => { historyDrillRange = null; renderHistoryTable(); });
             UI.filterDateEnd.addEventListener('change', () => { historyDrillRange = null; renderHistoryTable(); });
+            UI.filterReassigned.addEventListener('change', renderHistoryTable);
 
             // Chart Range Listeners
             UI.chartRangeSelect.addEventListener('change', () => {
@@ -2062,12 +2070,17 @@
             const fAgent = UI.filterAgent.value;
             const fStart = UI.filterDateStart.value;
             const fEnd = UI.filterDateEnd.value;
-            
+            const fReassigned = UI.filterReassigned.value;
+
             return State.tickets.filter(t => {
                 const matchAgent = fAgent ? t.agentId === fAgent : true;
                 const matchStart = fStart ? t.date >= fStart : true;
                 const matchEnd = fEnd ? t.date <= fEnd : true;
                 if (!matchAgent || !matchStart || !matchEnd) return false;
+
+                const wasReassigned = !!t.reassignedFrom;
+                if (fReassigned === 'yes' && !wasReassigned) return false;
+                if (fReassigned === 'no' && wasReassigned) return false;
 
                 if (historyDrillRange) {
                     const ts = parseTicketTimestamp(t);
@@ -2084,11 +2097,14 @@
                 return;
             }
 
+            // New columns are appended, never inserted: importCSV reads the first four by
+            // position, so reordering here would silently break re-importing an export.
             let csvContent = "data:text/csv;charset=utf-8,";
-            csvContent += "Assignee,Ticket Reference,Date,Timestamp\n";
-            
+            csvContent += "Assignee,Ticket Reference,Date,Timestamp,Assigned By,Reassigned From,Reassigned By,Reassigned On\n";
+
             results.forEach(t => {
-                csvContent += `"${t.agentName}","${t.link}","${t.date}","${t.time}"\n`;
+                const reassignedOn = t.reassignedDate ? `${t.reassignedDate} ${t.reassignedTime || ''}`.trim() : '';
+                csvContent += `"${t.agentName}","${t.link}","${t.date}","${t.time}","${t.assignedBy || ''}","${t.reassignedFrom || ''}","${t.reassignedBy || ''}","${reassignedOn}"\n`;
             });
 
             const encodedUri = encodeURI(csvContent);
@@ -2122,15 +2138,22 @@
             const fEnd = UI.filterDateEnd.value || 'Today';
             doc.text(`Date Range: ${fStart} to ${fEnd}`, 14, 22);
 
-            const tableData = results.map(t => [t.agentName, t.link, t.date, t.time]);
+            const tableData = results.map(t => [
+                t.agentName,
+                formatUserLabel(t.assignedBy),
+                t.link,
+                t.date,
+                t.time,
+                t.reassignedFrom ? `from ${t.reassignedFrom}${t.reassignCount > 1 ? ` (x${t.reassignCount})` : ''} by ${formatUserLabel(t.reassignedBy)}` : ''
+            ]);
 
             doc.autoTable({
                 startY: 28,
-                head: [['Assignee', 'Ticket Reference', 'Date', 'Timestamp']],
+                head: [['Assignee', 'Assigned By', 'Ticket Reference', 'Date', 'Timestamp', 'Reassignment']],
                 body: tableData,
                 theme: 'grid',
-                styles: { fontSize: 8, cellPadding: 3 },
-                headStyles: { fillColor: [79, 70, 229] } 
+                styles: { fontSize: 7, cellPadding: 2, overflow: 'linebreak' },
+                headStyles: { fillColor: [79, 70, 229] }
             });
 
             doc.save(`Assignment_Tracker_Report_${getLocalDateString()}.pdf`);
@@ -2158,7 +2181,13 @@
                         const link = cols[1].replace(/"/g, '').trim();
                         const date = cols[2].replace(/"/g, '').trim();
                         const time = cols[3].replace(/"/g, '').trim();
-                        
+                        // Columns 5+ are optional: an export from this app carries them, a
+                        // hand-made 4-column CSV doesn't. Read them if present so a
+                        // round-trip through export/import doesn't quietly lose attribution.
+                        const assignedBy = cols[4] ? cols[4].replace(/"/g, '').trim() : '';
+                        const reassignedFrom = cols[5] ? cols[5].replace(/"/g, '').trim() : '';
+                        const reassignedBy = cols[6] ? cols[6].replace(/"/g, '').trim() : '';
+
                         const agent = State.agents.find(a => a.name.toLowerCase() === name.toLowerCase());
                         const agentId = agent ? agent.id : 'imported-agent';
 
@@ -2171,7 +2200,9 @@
                                 agentName: name,
                                 link: link,
                                 date: date,
-                                time: time
+                                time: time,
+                                assignedBy: assignedBy,
+                                ...(reassignedFrom ? { reassignedFrom, reassignedBy, reassignCount: 1 } : {})
                             });
                             if (agent) agent.total++;
                             importedCount++;
@@ -2477,7 +2508,8 @@
                 agentName: currAgent.name,
                 link: link,
                 date: getLocalDateString(),
-                time: getFormattedTime()
+                time: getFormattedTime(),
+                assignedBy: currentUserEmail()
             });
 
             currAgent.total++;
@@ -2523,7 +2555,8 @@
                 agentName: currAgent.name,
                 link: link,
                 date: getLocalDateString(), 
-                time: getFormattedTime()
+                time: getFormattedTime(),
+                assignedBy: currentUserEmail()
             });
 
             currAgent.total++;
@@ -2562,7 +2595,8 @@
                 agentName: currAgent.name,
                 link: link,
                 date: getLocalDateString(), 
-                time: getFormattedTime()
+                time: getFormattedTime(),
+                assignedBy: currentUserEmail()
             });
 
             currAgent.total++;
@@ -2601,7 +2635,8 @@
                 agentName: currAgent.name,
                 link: link,
                 date: getLocalDateString(),
-                time: getFormattedTime()
+                time: getFormattedTime(),
+                assignedBy: currentUserEmail()
             });
 
             currAgent.total++;
@@ -2673,6 +2708,19 @@
             return (link || '').split('/').pop().substring(0, 8) || 'Ticket';
         }
 
+        // Who is performing the action right now. Stored on ticket records so the History
+        // Log can show who assigned a ticket, not just who it landed on.
+        function currentUserEmail() {
+            return (State.currentUser && State.currentUser.email) || '';
+        }
+
+        // Records predating the assignedBy field have no value, so show an em dash rather
+        // than inventing an attribution.
+        function formatUserLabel(email) {
+            if (!email) return '—';
+            return String(email).split('@')[0];
+        }
+
         // The real Zendesk ticket id when resolvable (trailing digits in the URL,
         // or the id itself for Zendesk Queue tickets), else null for arbitrary
         // pasted references that aren't a Zendesk ticket link.
@@ -2701,6 +2749,11 @@
         // Moves an already-assigned ticket to a different agent in place (rather
         // than leaving a duplicate record behind): decrements the old agent's
         // total, increments the new agent's, and logs it as a reassignment.
+        //
+        // The record is mutated rather than duplicated on purpose -- a second row would
+        // double-count the ticket in the History Log's total and the per-agent chart. So the
+        // reassignment is captured as metadata on the same record instead, which is what the
+        // History Log's "Reassigned" badge and filter read.
         function reassignExistingTicket(existingTicket, newAgent, extraFields) {
             const oldAgent = State.agents.find(a => a.id === existingTicket.agentId);
             const oldAgentName = existingTicket.agentName;
@@ -2708,6 +2761,13 @@
             newAgent.total++;
             existingTicket.agentId = newAgent.id;
             existingTicket.agentName = newAgent.name;
+            existingTicket.reassignedFrom = oldAgentName;
+            existingTicket.reassignedBy = currentUserEmail();
+            existingTicket.reassignedDate = getLocalDateString();
+            existingTicket.reassignedTime = getFormattedTime();
+            // A ticket bounced repeatedly is worth being able to see, so count rather than
+            // just flag. Only the most recent hop's from/by/when is kept.
+            existingTicket.reassignCount = (existingTicket.reassignCount || 0) + 1;
             if (extraFields) Object.assign(existingTicket, extraFields);
             logActivity(newAgent.name, `<strong>#${shortTicketRef(existingTicket.link)}</strong> was reassigned from <strong>${oldAgentName}</strong> to <strong>${newAgent.name}</strong>`);
         }
@@ -3095,7 +3155,7 @@
             UI.tableHistory.innerHTML = '';
             UI.statFiltered.innerText = results.length;
 
-            if (results.length === 0) return UI.tableHistory.innerHTML = `<tr><td colspan="6" style="text-align:center; color: var(--text-muted); padding: 2rem;">No logs match criteria.</td></tr>`;
+            if (results.length === 0) return UI.tableHistory.innerHTML = `<tr><td colspan="7" style="text-align:center; color: var(--text-muted); padding: 2rem;">No logs match criteria.</td></tr>`;
 
             const user = State.currentUser;
             const canManageTickets = user && (user.role === 'admin' || (user.permissions && user.permissions.manageTickets));
@@ -3114,11 +3174,28 @@
                     ? `<span class="priority-badge priority-normal">Zendesk Queue</span>`
                     : `<span class="priority-badge priority-low">Manual Link</span>`;
 
+                // Reassignments mutate the record in place, so without this badge a moved
+                // ticket looks like it was always the current agent's.
+                let reassignedBadge = '';
+                if (t.reassignedFrom) {
+                    const times = t.reassignCount > 1 ? ` &times;${t.reassignCount}` : '';
+                    const detail = `Reassigned from ${t.reassignedFrom}`
+                        + (t.reassignedBy ? ` by ${formatUserLabel(t.reassignedBy)}` : '')
+                        + (t.reassignedDate ? ` on ${t.reassignedDate} ${t.reassignedTime || ''}` : '')
+                        + (t.reassignCount > 1 ? ` (${t.reassignCount} reassignments in total)` : '');
+                    reassignedBadge = ` <span class="priority-badge" style="background: rgba(245, 158, 11, 0.15); color: #f59e0b;" title="${escapeHtml(detail)}">Reassigned${times}</span>`;
+                }
+
+                // For a reassigned ticket the person who put it with the CURRENT agent is the
+                // reassigner, so that's the more truthful attribution to surface.
+                const attributedTo = formatUserLabel(t.reassignedBy || t.assignedBy);
+
                 UI.tableHistory.insertAdjacentHTML('beforeend', `
                     <tr>
                         <td style="font-weight: 600;">${t.agentName}</td>
+                        <td style="color: var(--text-muted);">${escapeHtml(attributedTo)}</td>
                         <td class="link-cell"><a href="${t.link}" target="_blank">${t.link}</a></td>
-                        <td>${sourceBadge}</td>
+                        <td>${sourceBadge}${reassignedBadge}</td>
                         <td>${t.date}</td>
                         <td style="color: var(--text-muted);">${t.time}</td>
                         ${actionHtml}
@@ -4025,7 +4102,8 @@
                             date: getLocalDateString(),
                             time: getFormattedTime(),
                             zendeskId: ticket.id,
-                            source: 'zendesk'
+                            source: 'zendesk',
+                            assignedBy: currentUserEmail()
                         });
                         agent.total++;
                         logActivity(agent.name, `<strong>#${ticket.id}</strong> was assigned to <strong>${agent.name}</strong>`);
@@ -4186,7 +4264,8 @@
                             time: getFormattedTime(),
                             zendeskId: ticket.id,
                             source: 'zendesk',
-                            irSent: true
+                            irSent: true,
+                            assignedBy: currentUserEmail()
                         });
                         agent.total++;
                         logActivity(agent.name, `<strong>#${ticket.id}</strong> — initial response sent, assigned to <strong>${agent.name}</strong>`);
