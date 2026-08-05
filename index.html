@@ -502,7 +502,7 @@
                     <div class="view-header-flex" style="margin-bottom: 1.5rem;">
                         <div class="page-title">
                             <h1>Zendesk Queue</h1>
-                            <p>Unassigned and suspended Zendesk tickets &mdash; summarize, assign, and reply without leaving the tracker.</p>
+                            <p>Unassigned, suspended, and offline agents' open tickets &mdash; summarize, assign, and reply without leaving the tracker.</p>
                         </div>
                         <div class="stat-cards">
                             <div class="stat-card blue" style="min-width:auto;">
@@ -513,12 +513,17 @@
                                 <span class="stat-label">Suspended Tickets</span>
                                 <span class="stat-value" id="stat-zendesk-suspended">0</span>
                             </div>
+                            <div class="stat-card orange" style="min-width:auto;">
+                                <span class="stat-label">Offline Agents' Open</span>
+                                <span class="stat-value" id="stat-zendesk-offline">0</span>
+                            </div>
                         </div>
                     </div>
 
-                    <div style="display: flex; gap: 0.5rem; margin-bottom: 1rem;">
+                    <div style="display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap;">
                         <button type="button" class="btn btn-primary" id="tab-zendesk-unassigned" style="padding: 0.6rem 1.25rem;" onclick="window.switchZendeskTab('unassigned')">Unassigned</button>
                         <button type="button" class="btn btn-outline" id="tab-zendesk-suspended" style="padding: 0.6rem 1.25rem;" onclick="window.switchZendeskTab('suspended')">Suspended</button>
+                        <button type="button" class="btn btn-outline" id="tab-zendesk-offline" style="padding: 0.6rem 1.25rem;" onclick="window.switchZendeskTab('offline')">Offline Agents</button>
                     </div>
 
                     <div id="zendesk-unassigned-panel" class="panel">
@@ -571,6 +576,36 @@
                                 </thead>
                                 <tbody id="table-zendesk-suspended">
                                     <tr><td colspan="5" style="text-align:center; color: var(--text-muted); padding: 2rem;">Configure Zendesk in <a href="admin.html">admin.html</a>, then click Refresh.</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div id="zendesk-offline-panel" class="panel hidden">
+                        <div class="panel-header">
+                            <h2>Open Tickets Held By Offline Agents</h2>
+                            <div style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
+                                <span id="zendesk-offline-status" style="font-size: 0.8rem; color: var(--text-muted);"></span>
+                                <button class="btn btn-outline" id="btn-refresh-offline" style="padding: 0.4rem 1rem; font-size: 0.8rem;">Refresh</button>
+                            </div>
+                        </div>
+                        <div class="panel-body" style="padding-top: 0; padding-bottom: 0.5rem;">
+                            <span class="input-hint">Support agents currently marked Offline in the Agents tab, and their tickets still sitting in the <strong>open</strong> status. Reassign to move one to an available agent.</span>
+                        </div>
+                        <div style="max-height: 600px; overflow-y: auto;">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th style="width: 2rem;"></th>
+                                        <th>Ticket</th>
+                                        <th>Assigned To</th>
+                                        <th>Created</th>
+                                        <th>Open For</th>
+                                        <th style="text-align: right;">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="table-zendesk-offline">
+                                    <tr><td colspan="6" style="text-align:center; color: var(--text-muted); padding: 2rem;">Configure Zendesk in <a href="admin.html">admin.html</a>, then click Refresh.</td></tr>
                                 </tbody>
                             </table>
                         </div>
@@ -1251,6 +1286,7 @@
         let zendeskQueueCache = [];
         let zendeskRequesterMap = {};
         let zendeskSuspendedCache = [];
+        let zendeskOfflineCache = [];
         let zendeskSelectedIds = new Set();
         // Guards confirmAssignZendeskTicket/confirmSendIr against a rapid double-click:
         // both are async with a real network call between the duplicate-ticket check
@@ -1368,6 +1404,12 @@
             tabZendeskSuspended: document.getElementById('tab-zendesk-suspended'),
             panelZendeskUnassigned: document.getElementById('zendesk-unassigned-panel'),
             panelZendeskSuspended: document.getElementById('zendesk-suspended-panel'),
+            statZendeskOffline: document.getElementById('stat-zendesk-offline'),
+            tabZendeskOffline: document.getElementById('tab-zendesk-offline'),
+            panelZendeskOffline: document.getElementById('zendesk-offline-panel'),
+            tableZendeskOffline: document.getElementById('table-zendesk-offline'),
+            zendeskOfflineStatus: document.getElementById('zendesk-offline-status'),
+            btnRefreshOffline: document.getElementById('btn-refresh-offline'),
             tableZendeskQueue: document.getElementById('table-zendesk-queue'),
             tableZendeskSuspended: document.getElementById('table-zendesk-suspended'),
             zendeskQueueStatus: document.getElementById('zendesk-queue-status'),
@@ -1631,6 +1673,7 @@
 
             UI.btnRefreshZendesk.addEventListener('click', fetchUnassignedZendeskTickets);
             UI.btnRefreshSuspended.addEventListener('click', fetchSuspendedZendeskTickets);
+            UI.btnRefreshOffline.addEventListener('click', fetchOfflineAgentZendeskTickets);
             UI.btnBulkSendIr.addEventListener('click', window.openBulkSendIrModal);
 
             // CSAT Range Listeners
@@ -3394,6 +3437,126 @@
             }
         }
 
+        // Support agents marked Offline who can actually be queried. An agent with no
+        // zendeskEmail can't be searched by assignee at all, so they're reported separately
+        // rather than silently making the queue look clean.
+        function getOfflineSupportAgents() {
+            const offline = State.agents.filter(a => a.role === 'support' && !a.isAvailable);
+            return {
+                queryable: offline.filter(a => a.zendeskEmail && a.zendeskEmail.trim()),
+                missingEmail: offline.filter(a => !a.zendeskEmail || !a.zendeskEmail.trim())
+            };
+        }
+
+        async function fetchOfflineAgentZendeskTickets() {
+            const zd = State.settings.zendesk;
+            if (!zd || !zd.subdomain || !zd.email || !zd.apiToken || !zd.proxyUrl) {
+                UI.tableZendeskOffline.innerHTML = `<tr><td colspan="6" style="text-align:center; color: var(--text-muted); padding: 2rem;">Configure Zendesk in <a href="admin.html">admin.html</a>, then click Refresh.</td></tr>`;
+                UI.statZendeskOffline.innerText = '0';
+                return;
+            }
+
+            const { queryable, missingEmail } = getOfflineSupportAgents();
+
+            if (queryable.length === 0) {
+                zendeskOfflineCache = [];
+                UI.statZendeskOffline.innerText = '0';
+                UI.zendeskOfflineStatus.innerText = `Updated ${getFormattedTime()}`;
+                const note = missingEmail.length > 0
+                    ? `No offline support agents have a Zendesk email set, so their tickets can't be looked up. Missing: ${escapeHtml(missingEmail.map(a => a.name).join(', '))}.`
+                    : 'Every support agent is currently marked Available — nothing to redistribute.';
+                UI.tableZendeskOffline.innerHTML = `<tr><td colspan="6" style="text-align:center; color: var(--text-muted); padding: 2rem;">${note}</td></tr>`;
+                return;
+            }
+
+            UI.zendeskOfflineStatus.innerText = 'Loading…';
+            UI.tableZendeskOffline.innerHTML = `<tr><td colspan="6" style="text-align:center; color: var(--text-muted); padding: 2rem;">Checking ${queryable.length} offline agent${queryable.length === 1 ? '' : 's'} in Zendesk…</td></tr>`;
+
+            try {
+                // One query per agent: Zendesk search can't OR several assignees together.
+                // allSettled so one agent with a stale Zendesk email can't blank the tab.
+                const settled = await Promise.allSettled(queryable.map(async agent => {
+                    const query = `type:ticket status:open assignee:${agent.zendeskEmail.trim()}`;
+                    const target = `https://${zd.subdomain}.zendesk.com/api/v2/search.json?query=${encodeURIComponent(query)}&sort_by=created_at&sort_order=asc`;
+                    const res = await zendeskFetch(target, { method: 'GET' });
+                    if (!res.ok) throw new Error(`Zendesk returned ${res.status} for ${agent.name}`);
+                    const data = await res.json();
+                    // Tag each ticket with the tracker agent it came from, so the table can
+                    // name them without another assignee_id lookup.
+                    return (data.results || []).map(t => ({ ...t, offlineAgentId: agent.id, offlineAgentName: agent.name }));
+                }));
+
+                const failed = settled.filter(s => s.status === 'rejected');
+                failed.forEach(s => console.error('Offline agent lookup failed:', s.reason));
+                if (failed.length === queryable.length) throw new Error('every offline-agent lookup failed');
+
+                const byId = new Map();
+                settled.filter(s => s.status === 'fulfilled')
+                    .forEach(s => s.value.forEach(t => { if (t.id != null) byId.set(t.id, t); }));
+                zendeskOfflineCache = [...byId.values()].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+
+                await loadZendeskRequesterNames(zendeskOfflineCache);
+                renderOfflineAgentTable();
+
+                const parts = [`Updated ${getFormattedTime()}`];
+                if (failed.length > 0) parts.push(`${failed.length} agent lookup(s) failed — see console`);
+                if (missingEmail.length > 0) parts.push(`${missingEmail.length} offline agent(s) have no Zendesk email`);
+                UI.zendeskOfflineStatus.innerText = parts.join(' · ');
+            } catch (err) {
+                console.error(err);
+                UI.zendeskOfflineStatus.innerText = '';
+                UI.tableZendeskOffline.innerHTML = `<tr><td colspan="6" style="text-align:center; color: #f43f5e; padding: 2rem;">Couldn't load offline agents' tickets. Check Zendesk settings in admin.html and the console.</td></tr>`;
+                notify("Failed to load offline agents' tickets.");
+            }
+        }
+
+        function renderOfflineAgentTable() {
+            UI.statZendeskOffline.innerText = zendeskOfflineCache.length;
+            UI.tableZendeskOffline.innerHTML = '';
+
+            if (zendeskOfflineCache.length === 0) {
+                const { queryable } = getOfflineSupportAgents();
+                UI.tableZendeskOffline.innerHTML = `<tr><td colspan="6" style="text-align:center; color: var(--text-muted); padding: 2rem;">${queryable.length} offline support agent${queryable.length === 1 ? '' : 's'}, but none are holding open tickets.</td></tr>`;
+                return;
+            }
+
+            zendeskOfflineCache.forEach(t => {
+                const requester = zendeskRequesterMap[t.requester_id] || { name: `Requester #${t.requester_id}`, email: '' };
+                const ticketUrl = `https://${State.settings.zendesk.subdomain}.zendesk.com/agent/tickets/${t.id}`;
+
+                UI.tableZendeskOffline.insertAdjacentHTML('beforeend', `
+                    <tr id="offline-row-${t.id}">
+                        <td>
+                            <button class="btn-icon" title="View customer message" onclick="window.toggleOfflineMessage(${t.id})">
+                                <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                            </button>
+                        </td>
+                        <td class="ticket-subject-cell">
+                            <span class="subj"><a href="${ticketUrl}" target="_blank" rel="noopener">#${t.id}</a> &mdash; ${escapeHtml(t.subject || '(no subject)')}</span>
+                            <span class="req">${escapeHtml(requester.name)}${requester.email ? ` &lt;${escapeHtml(requester.email)}&gt;` : ''}</span>
+                        </td>
+                        <td>
+                            ${escapeHtml(t.offlineAgentName || 'Unknown')}
+                            <span class="badge-shift" style="color: #f59e0b; margin-left: 0.35rem;">Offline</span>
+                        </td>
+                        <td style="color: var(--text-muted);">${formatZendeskTimestamp(t.created_at)}</td>
+                        <td><span class="badge-shift zendesk-age" data-created="${escapeHtml(t.created_at || '')}">${escapeHtml(formatZendeskAge(t.created_at))}</span></td>
+                        <td style="text-align: right;">
+                            <div class="zendesk-row-actions">
+                                <button class="btn btn-primary" style="padding: 0.4rem 0.9rem; font-size: 0.8rem;" onclick="window.openReassignZendeskModal(${t.id})">Reassign</button>
+                            </div>
+                        </td>
+                    </tr>
+                `);
+            });
+        }
+
+        window.toggleOfflineMessage = function(ticketId) {
+            const ticket = zendeskOfflineCache.find(t => t.id === ticketId);
+            if (!ticket) return;
+            toggleMessageRow(`offline-row-${ticketId}`, `offline-detail-${ticketId}`, 6, ticket.description);
+        };
+
         // Zendesk's /search.json silently ignores `include=users`, so requester names
         // have to be resolved with a real batch lookup instead of a sideload.
         async function loadZendeskRequesterNames(tickets) {
@@ -3541,28 +3704,35 @@
                 : `Sent to ${successCount}, failed for ${failCount} — check the console.`);
         };
 
-        window.switchZendeskTab = function(tab) {
-            const isUnassigned = tab === 'unassigned';
-            UI.tabZendeskUnassigned.classList.toggle('btn-primary', isUnassigned);
-            UI.tabZendeskUnassigned.classList.toggle('btn-outline', !isUnassigned);
-            UI.tabZendeskSuspended.classList.toggle('btn-primary', !isUnassigned);
-            UI.tabZendeskSuspended.classList.toggle('btn-outline', isUnassigned);
-            UI.panelZendeskUnassigned.classList.toggle('hidden', !isUnassigned);
-            UI.panelZendeskSuspended.classList.toggle('hidden', isUnassigned);
+        // Table-driven rather than a pair of booleans -- with three tabs the old
+        // "isUnassigned ? a : b" shape stops being expressible, and refreshActiveZendeskTab
+        // has to be able to work out which of N panels is currently showing.
+        function zendeskTabs() {
+            return {
+                unassigned: { button: UI.tabZendeskUnassigned, panel: UI.panelZendeskUnassigned, fetch: fetchUnassignedZendeskTickets },
+                suspended: { button: UI.tabZendeskSuspended, panel: UI.panelZendeskSuspended, fetch: fetchSuspendedZendeskTickets },
+                offline: { button: UI.tabZendeskOffline, panel: UI.panelZendeskOffline, fetch: fetchOfflineAgentZendeskTickets }
+            };
+        }
 
-            if (isUnassigned) {
-                fetchUnassignedZendeskTickets();
-            } else {
-                fetchSuspendedZendeskTickets();
-            }
+        window.switchZendeskTab = function(tab) {
+            const tabs = zendeskTabs();
+            if (!tabs[tab]) return;
+
+            Object.entries(tabs).forEach(([name, t]) => {
+                const active = name === tab;
+                t.button.classList.toggle('btn-primary', active);
+                t.button.classList.toggle('btn-outline', !active);
+                t.panel.classList.toggle('hidden', !active);
+            });
+
+            tabs[tab].fetch();
         };
 
         function refreshActiveZendeskTab() {
-            if (UI.panelZendeskUnassigned.classList.contains('hidden')) {
-                fetchSuspendedZendeskTickets();
-            } else {
-                fetchUnassignedZendeskTickets();
-            }
+            const tabs = zendeskTabs();
+            const active = Object.values(tabs).find(t => !t.panel.classList.contains('hidden'));
+            (active || tabs.unassigned).fetch();
         }
 
         async function fetchSuspendedZendeskTickets() {
@@ -3780,6 +3950,32 @@
             UI.modalAssignZendesk.classList.add('active');
         };
 
+        // Moving an offline agent's ticket to someone who can act on it. Reuses the Assign
+        // modal wholesale -- it already has the round-robin box, group select, CC list and
+        // the duplicate-aware commit path. The one difference: the Other Agents list is
+        // restricted to AVAILABLE agents (and excludes the current holder), since offering
+        // to hand the ticket to another offline agent would defeat the point.
+        window.openReassignZendeskModal = function(ticketId) {
+            const ticket = zendeskOfflineCache.find(t => t.id === ticketId);
+            if (!ticket) return;
+
+            UI.assignZendeskId.value = ticket.id;
+            UI.assignZendeskSubject.innerText = `#${ticket.id} — ${ticket.subject || '(no subject)'} (currently ${ticket.offlineAgentName || 'unknown'}, offline)`;
+
+            const eligibleAgents = State.agents.filter(a =>
+                a.isAvailable && a.zendeskEmail && a.zendeskEmail.trim() !== '' && a.id !== ticket.offlineAgentId);
+            populateOtherAgentsSelect(UI.assignZendeskAgentSelect, eligibleAgents);
+            renderNextAgentBox('assign-zendesk', getNextZendeskQueueAgent());
+
+            UI.assignZendeskAgentSelect.classList.add('hidden');
+            document.getElementById('assign-zendesk-next-box').classList.remove('hidden');
+            document.getElementById('btn-assign-zendesk-other-agents').innerText = 'Other Agents';
+
+            resetCcCheckboxes('assign-cc-group');
+            populateGroupSelect(UI.assignZendeskGroupSelect);
+            UI.modalAssignZendesk.classList.add('active');
+        };
+
         window.confirmAssignZendeskTicket = async function(action) {
             const ticketId = Number(UI.assignZendeskId.value);
             if (zendeskAssignInFlight.has(ticketId)) return;
@@ -3788,7 +3984,11 @@
             try {
                 const usingOther = isUsingOtherAgents('assign-zendesk');
                 const agentId = getEffectiveZendeskAgentId('assign-zendesk');
-                const ticket = zendeskQueueCache.find(t => t.id === ticketId);
+                // The modal serves both the Unassigned tab and the Offline Agents tab, so the
+                // ticket may live in either cache. Which one it came from also decides which
+                // table to drop it from on success (see below).
+                const fromOffline = zendeskOfflineCache.some(t => t.id === ticketId);
+                const ticket = (fromOffline ? zendeskOfflineCache : zendeskQueueCache).find(t => t.id === ticketId);
                 const agent = State.agents.find(a => a.id === agentId);
 
                 if (!ticket || !agent || !agent.zendeskEmail) {
@@ -3839,12 +4039,19 @@
                     State.commit(['tickets', 'agents', 'activities', 'queueIdx']);
                     syncUI();
 
-                    zendeskQueueCache = zendeskQueueCache.filter(t => t.id !== ticket.id);
-                    renderZendeskQueueTable();
+                    if (fromOffline) {
+                        zendeskOfflineCache = zendeskOfflineCache.filter(t => t.id !== ticket.id);
+                        renderOfflineAgentTable();
+                    } else {
+                        zendeskQueueCache = zendeskQueueCache.filter(t => t.id !== ticket.id);
+                        renderZendeskQueueTable();
+                    }
 
                     window.closeModals();
                     if (!handleSlackRedirect(action, agent)) {
-                        notify(`Assigned Zendesk ticket #${ticket.id} to ${agent.name}`);
+                        notify(fromOffline
+                            ? `Reassigned Zendesk ticket #${ticket.id} to ${agent.name}`
+                            : `Assigned Zendesk ticket #${ticket.id} to ${agent.name}`);
                     }
                 } catch (err) {
                     console.error(err);
