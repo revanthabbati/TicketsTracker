@@ -4350,15 +4350,38 @@
             UI.tableCsat.innerHTML = `<tr><td colspan="7" style="text-align:center; color: var(--text-muted); padding: 2rem;">Loading ratings from Zendesk…</td></tr>`;
 
             try {
-                // Good ratings: only tickets actually closed within the selected range.
-                // Bad ratings: same range, but not restricted to closed tickets -- an
-                // unhappy customer's ticket may still be open/pending, and it shouldn't
-                // disappear from view until it's dealt with, not until it happens to close.
-                const [goodTickets, badTickets] = await Promise.all([
-                    searchZendeskTickets(zd, `type:ticket status:closed satisfaction:good updated>=${startStr} updated<=${endStr}`),
-                    searchZendeskTickets(zd, `type:ticket satisfaction:bad updated>=${startStr} updated<=${endStr}`)
+                // Zendesk treats "good" and "goodwithcomment" as SEPARATE, non-overlapping
+                // satisfaction values -- satisfaction:good matches only ratings with no
+                // comment. Querying just :good silently dropped every rating that had a
+                // comment, which both undercounted totals (4 of 8 for one agent) and made the
+                // "w/ comment" columns permanently zero. Both variants are required.
+                //
+                // Good ratings are dated by SOLVED, not updated. `updated` was a close-time
+                // proxy, but it also catches tickets solved before the range and merely
+                // closed inside it -- 11 for one agent where Zendesk Explore reports 8.
+                // Explore's own CSAT reporting keys off solved date, so this now agrees with it.
+                //
+                // Bad ratings deliberately keep `updated` and no status filter: an unhappy
+                // customer's ticket may still be open, and an unsolved ticket has no solved
+                // date at all, so filtering those by solved would hide exactly the live ones
+                // that most need attention.
+                const [goodPlain, goodCommented, badPlain, badCommented] = await Promise.all([
+                    searchZendeskTickets(zd, `type:ticket status:closed satisfaction:good solved>=${startStr} solved<=${endStr}`),
+                    searchZendeskTickets(zd, `type:ticket status:closed satisfaction:goodwithcomment solved>=${startStr} solved<=${endStr}`),
+                    searchZendeskTickets(zd, `type:ticket satisfaction:bad updated>=${startStr} updated<=${endStr}`),
+                    searchZendeskTickets(zd, `type:ticket satisfaction:badwithcomment updated>=${startStr} updated<=${endStr}`)
                 ]);
-                const allTickets = goodTickets.concat(badTickets);
+                const goodTickets = goodPlain.concat(goodCommented);
+                const badTickets = badPlain.concat(badCommented);
+
+                // Dedupe by id: a ticket can't be both, but the same ticket can come back
+                // from more than one page/query, and double-counting would inflate an agent.
+                const seen = new Set();
+                const allTickets = goodTickets.concat(badTickets).filter(t => {
+                    if (t.id == null || seen.has(t.id)) return false;
+                    seen.add(t.id);
+                    return true;
+                });
 
                 const assigneeIds = [...new Set(allTickets.map(t => t.assignee_id).filter(Boolean))];
                 const infoById = {};
@@ -4403,8 +4426,14 @@
                     .map(([key, g]) => ({ key, ...g }))
                     .sort((a, b) => a.name.localeCompare(b.name));
 
-                UI.statCsatGood.innerText = goodTickets.length;
-                UI.statCsatBad.innerText = badTickets.length;
+                // Taken from the deduped, actually-counted set so the stat cards can't
+                // disagree with the sum of the table below them.
+                const totals = csatCache.reduce((acc, g) => ({
+                    good: acc.good + g.goodWith + g.goodWithout,
+                    bad: acc.bad + g.badWith + g.badWithout
+                }), { good: 0, bad: 0 });
+                UI.statCsatGood.innerText = totals.good;
+                UI.statCsatBad.innerText = totals.bad;
                 renderCsatTable();
                 UI.csatStatus.innerText = `Updated ${getFormattedTime()}`;
             } catch (err) {
@@ -4590,7 +4619,7 @@ Zendesk search cannot OR multiple values of the same field in one query string. 
 
 NEVER invent an email address. Only use requester: or assignee: with an email that either appears in the agent list below or was typed out in full by the agent. When someone is referred to by name, look their email up in that list. If a name is not in the list, or the subject is a customer/company/account rather than a person, do NOT guess an email -- instead return multiple queries covering the plausible interpretations (organization:<name>, the account custom field with the name as a slug, and the name as a bare keyword). The caller merges them, so a query that matches nothing costs nothing.
 
-CSAT / satisfaction rating questions must NOT use search at all. Zendesk's search index undercounts satisfaction ratings badly -- for one agent it returned 4 of 8 real good ratings -- so there is a dedicated path. For any question about CSAT, satisfaction, ratings, reviews, good/bad scores or rating comments, set "action":"csat" and fill in the csat fields instead of writing queries.
+CSAT / satisfaction rating questions must NOT use search. Zendesk splits satisfaction into separate values -- satisfaction:good matches only ratings WITHOUT a comment, and satisfaction:goodwithcomment the ones with -- which makes search an easy way to silently count half the ratings. There is a dedicated path instead. For any question about CSAT, satisfaction, ratings, reviews, good/bad scores or rating comments, set "action":"csat" and fill in the csat fields rather than writing queries.
 
 ${aiAgentRosterText()}
 
@@ -4639,12 +4668,13 @@ or for a CSAT question:
             return plan;
         }
 
-        // CSAT questions bypass search entirely. Zendesk's search index undercounts
-        // satisfaction ratings: for Ganesh Ingle over 1 May - 31 Jul 2026, `satisfaction:good
-        // assignee:...` returned 4 tickets while the Satisfaction Ratings API returned 8 --
-        // and the 4 it missed were closed, good-rated, still assigned to him, and each
-        // individually findable by id. The ratings endpoint agrees with Zendesk Explore, and
-        // is what the CSAT tab already uses, so it's treated as the authority here.
+        // CSAT questions bypass search. Zendesk splits satisfaction into separate,
+        // non-overlapping search values: satisfaction:good matches only ratings with NO
+        // comment, satisfaction:goodwithcomment only those with one (same for bad). Querying
+        // :good alone returned 4 of Ganesh Ingle's 8 good ratings for 1 May - 31 Jul 2026 --
+        // exactly the 4 without comments. The Satisfaction Ratings API needs no such union,
+        // always carries the comment, and agrees with Zendesk Explore, so it's the authority
+        // here rather than a query the model has to remember to write in two halves.
         async function fetchCsatRatingsForChat(zd, plan) {
             // Dates are interpreted in the browser's local zone, which is what someone asking
             // for "1 May to 31 July" means -- not the account's Pacific timezone.
