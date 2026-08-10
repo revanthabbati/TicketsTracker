@@ -4576,7 +4576,6 @@ Available Zendesk search syntax:
 - requester:<email>
 - assignee:<email>
 - organization:<name>
-- satisfaction:good / satisfaction:bad -- the CSAT rating the customer left
 - tags:<tag>
 - subject:<word>  description:<word>
 - date filters: created / updated / solved followed by >, <, >=, or <= and a date in YYYY-MM-DD format
@@ -4591,7 +4590,7 @@ Zendesk search cannot OR multiple values of the same field in one query string. 
 
 NEVER invent an email address. Only use requester: or assignee: with an email that either appears in the agent list below or was typed out in full by the agent. When someone is referred to by name, look their email up in that list. If a name is not in the list, or the subject is a customer/company/account rather than a person, do NOT guess an email -- instead return multiple queries covering the plausible interpretations (organization:<name>, the account custom field with the name as a slug, and the name as a bare keyword). The caller merges them, so a query that matches nothing costs nothing.
 
-Zendesk cannot search on whether a CSAT rating has a comment. For questions about rating comments, search satisfaction:good or satisfaction:bad with the date range and set countOnly false -- the answering step gets each ticket's rating and comment and can count them itself.
+CSAT / satisfaction rating questions must NOT use search at all. Zendesk's search index undercounts satisfaction ratings badly -- for one agent it returned 4 of 8 real good ratings -- so there is a dedicated path. For any question about CSAT, satisfaction, ratings, reviews, good/bad scores or rating comments, set "action":"csat" and fill in the csat fields instead of writing queries.
 
 ${aiAgentRosterText()}
 
@@ -4603,22 +4602,33 @@ ${loaded}
 Latest message: "${message}"
 
 Decide:
-- "action": "search" to run new Zendesk queries, or "reuse" if the message is a follow-up about the already-loaded tickets (e.g. "which of those is oldest?", "summarise the third one") and needs no new data. Use "search" if no tickets are loaded.
+- "action": "search" to run new Zendesk queries, "csat" for anything about satisfaction ratings, or "reuse" if the message is a follow-up about the already-loaded tickets (e.g. "which of those is oldest?", "summarise the third one") and needs no new data. Use "search" if no tickets are loaded and it isn't a CSAT question.
 - "queries": the query strings to run. Required when action is "search", otherwise [].
+- CSAT fields, only when action is "csat":
+  - "csatScore": "good", "bad", or "any" if the question doesn't distinguish.
+  - "csatAgentEmail": the agent's email from the list above whose ratings are being asked about, or "" for the whole team.
+  - "csatFrom" / "csatTo": the date range as YYYY-MM-DD, inclusive. Always resolve to concrete dates; if the question gives no range, use the last 3 whole months ending today.
 - "countOnly": true if the message only asks how many (a number answers it fully). The caller then reads Zendesk's result count without downloading every ticket, so this works for very large sets.
 - "listOnly": true if the agent just wants to see the matching tickets listed, with no question to answer in prose.
 - "needsComments": true whenever answering depends on what was actually said or done inside the tickets. That covers resolutions, what an agent replied, root cause, configuration or sample values asked for, and any judgement call about the tickets ("why is this on hold?", "which of these could be closed?", "was this ever answered?"). False only for questions fully answerable from subject, status, assignee, priority, dates, ratings or counts. Fetching comments is slow, so don't set it when the metadata already answers the question.
 
 Respond with ONLY strict JSON, no markdown fences, no commentary:
-{"action":"search","queries":["type:ticket status:open requester:jane@acme.com"],"countOnly":false,"listOnly":false,"needsComments":false}`;
+{"action":"search","queries":["type:ticket status:open requester:jane@acme.com"],"countOnly":false,"listOnly":false,"needsComments":false}
+or for a CSAT question:
+{"action":"csat","queries":[],"csatScore":"good","csatAgentEmail":"jane@dispatchtrack.com","csatFrom":"2026-05-01","csatTo":"2026-07-31","countOnly":false,"listOnly":false,"needsComments":false}`;
 
             const parsed = parseGeminiJson(await callGemini(instructions));
+            const validActions = ['search', 'csat', 'reuse'];
             const plan = {
-                action: parsed.action === 'reuse' ? 'reuse' : 'search',
+                action: validActions.includes(parsed.action) ? parsed.action : 'search',
                 queries: Array.isArray(parsed.queries) ? parsed.queries.filter(q => typeof q === 'string' && q.trim()) : [],
                 countOnly: !!parsed.countOnly,
                 listOnly: !!parsed.listOnly,
-                needsComments: !!parsed.needsComments
+                needsComments: !!parsed.needsComments,
+                csatScore: ['good', 'bad', 'any'].includes(parsed.csatScore) ? parsed.csatScore : 'any',
+                csatAgentEmail: typeof parsed.csatAgentEmail === 'string' ? parsed.csatAgentEmail.trim() : '',
+                csatFrom: typeof parsed.csatFrom === 'string' ? parsed.csatFrom.trim() : '',
+                csatTo: typeof parsed.csatTo === 'string' ? parsed.csatTo.trim() : ''
             };
             // "reuse" with nothing loaded would answer from an empty context, so fall back
             // to searching. Likewise a "search" with no queries is unusable.
@@ -4627,6 +4637,93 @@ Respond with ONLY strict JSON, no markdown fences, no commentary:
                 throw new Error('AI did not return any search queries.');
             }
             return plan;
+        }
+
+        // CSAT questions bypass search entirely. Zendesk's search index undercounts
+        // satisfaction ratings: for Ganesh Ingle over 1 May - 31 Jul 2026, `satisfaction:good
+        // assignee:...` returned 4 tickets while the Satisfaction Ratings API returned 8 --
+        // and the 4 it missed were closed, good-rated, still assigned to him, and each
+        // individually findable by id. The ratings endpoint agrees with Zendesk Explore, and
+        // is what the CSAT tab already uses, so it's treated as the authority here.
+        async function fetchCsatRatingsForChat(zd, plan) {
+            // Dates are interpreted in the browser's local zone, which is what someone asking
+            // for "1 May to 31 July" means -- not the account's Pacific timezone.
+            const from = plan.csatFrom ? new Date(`${plan.csatFrom}T00:00:00`) : new Date(Date.now() - 90 * 86400000);
+            const toBase = plan.csatTo ? new Date(`${plan.csatTo}T00:00:00`) : new Date();
+            // csatTo is inclusive, so run to the end of that day.
+            const to = new Date(toBase.getTime() + 86400000 - 1);
+            const startUnix = Math.floor(from.getTime() / 1000);
+            // The endpoint rejects an end_time within the last minute.
+            const endUnix = Math.min(Math.floor(to.getTime() / 1000), Math.floor(Date.now() / 1000) - 120);
+
+            let target = `https://${zd.subdomain}.zendesk.com/api/v2/satisfaction_ratings.json?start_time=${startUnix}&end_time=${endUnix}`;
+            if (plan.csatScore === 'good' || plan.csatScore === 'bad') target += `&score=${plan.csatScore}`;
+
+            let ratings = [];
+            let pages = 0;
+            while (target && pages < 30) {
+                const res = await zendeskFetch(target, { method: 'GET' });
+                if (!res.ok) throw new Error(`Zendesk returned ${res.status}`);
+                const data = await res.json();
+                ratings = ratings.concat(data.satisfaction_ratings || []);
+                target = data.next_page || null;
+                pages++;
+            }
+
+            // The endpoint also returns "offered"/"unoffered" placeholders -- only real
+            // scores count as a CSAT.
+            ratings = ratings.filter(r => r.score === 'good' || r.score === 'bad');
+
+            let agentLabel = 'the whole team';
+            if (plan.csatAgentEmail) {
+                const userId = await resolveZendeskUserIdByEmail(zd, plan.csatAgentEmail);
+                if (!userId) throw new Error(`No Zendesk user found for ${plan.csatAgentEmail}`);
+                ratings = ratings.filter(r => r.assignee_id === userId);
+                agentLabel = plan.csatAgentEmail;
+            }
+
+            return {
+                ratings,
+                agentLabel,
+                fromLabel: plan.csatFrom || from.toISOString().slice(0, 10),
+                toLabel: plan.csatTo || toBase.toISOString().slice(0, 10)
+            };
+        }
+
+        const zendeskUserIdByEmail = {};
+
+        async function resolveZendeskUserIdByEmail(zd, email) {
+            const key = email.toLowerCase();
+            if (key in zendeskUserIdByEmail) return zendeskUserIdByEmail[key];
+            const target = `https://${zd.subdomain}.zendesk.com/api/v2/users/search.json?query=${encodeURIComponent(email)}`;
+            const res = await zendeskFetch(target, { method: 'GET' });
+            if (!res.ok) return (zendeskUserIdByEmail[key] = null);
+            const data = await res.json();
+            const match = (data.users || []).find(u => (u.email || '').toLowerCase() === key);
+            return (zendeskUserIdByEmail[key] = match ? match.id : null);
+        }
+
+        // Hydrates rated tickets so the results table, exports and expand-to-summarize keep
+        // working, with the ratings endpoint's score/comment taking precedence over whatever
+        // is embedded on the ticket.
+        async function hydrateTicketsForRatings(zd, ratings) {
+            const ids = [...new Set(ratings.map(r => r.ticket_id).filter(Boolean))];
+            const byId = new Map();
+            for (let i = 0; i < ids.length; i += 100) {
+                const batch = ids.slice(i, i + 100);
+                const target = `https://${zd.subdomain}.zendesk.com/api/v2/tickets/show_many.json?ids=${batch.join(',')}`;
+                const res = await zendeskFetch(target, { method: 'GET' });
+                if (!res.ok) continue;
+                const data = await res.json();
+                (data.tickets || []).forEach(t => byId.set(t.id, t));
+            }
+            const out = [];
+            ratings.forEach(r => {
+                const t = byId.get(r.ticket_id);
+                if (!t) return;
+                out.push({ ...t, satisfaction_rating: { score: r.score, comment: r.comment, id: r.id } });
+            });
+            return out.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
         }
 
         // Second of the two calls: answer the question from the retrieved tickets.
@@ -4667,9 +4764,12 @@ Respond with ONLY strict JSON, no markdown fences, no commentary:
             return lines.join('\n');
         }
 
-        async function answerAiChatQuestion(message, tickets, extraContext, queries) {
+        // omitFacts is set for CSAT turns, where extraContext already carries authoritative
+        // figures from the ratings endpoint. Emitting a second, separately-derived set of
+        // counts is what previously made the model hedge between contradictory numbers.
+        async function answerAiChatQuestion(message, tickets, extraContext, queries, omitFacts) {
             const included = tickets.slice(0, AI_ANSWER_MAX_TICKETS);
-            const facts = buildRetrievalFacts(included, queries);
+            const facts = omitFacts ? '' : buildRetrievalFacts(included, queries);
             const ticketBlocks = included.map(t => {
                 const requester = zendeskRequesterMap[t.requester_id] || {};
                 const assignee = zendeskRequesterMap[t.assignee_id] || {};
@@ -4906,6 +5006,46 @@ Agent's question: "${message}"`;
                     // results table fills in and the answer can name the tickets.
                 }
 
+                let csatContext = null;
+                if (plan.action === 'csat') {
+                    setAiChatThinking('Reading satisfaction ratings…');
+                    const csat = await fetchCsatRatingsForChat(zd, plan);
+                    const good = csat.ratings.filter(r => r.score === 'good');
+                    const bad = csat.ratings.filter(r => r.score === 'bad');
+                    const withComment = csat.ratings.filter(r => r.comment && String(r.comment).trim());
+
+                    setAiChatThinking('Loading the rated tickets…');
+                    const tickets = await hydrateTicketsForRatings(zd, csat.ratings);
+                    aiSearchCache = tickets;
+                    aiSearchLastQueries = [];
+                    renderAiSearchTable();
+                    fetchAiSearchJiraLinks(tickets).catch(err => console.error(err));
+
+                    // Counted from the ratings endpoint, which is the authority -- these
+                    // numbers stand even if fewer tickets could be hydrated for display.
+                    csatContext = [
+                        `CSAT figures from Zendesk's Satisfaction Ratings API (the authoritative source, and the one Zendesk Explore agrees with -- ticket search undercounts ratings and must not be used for this):`,
+                        `- scope: ${csat.agentLabel}, ratings submitted ${csat.fromLabel} to ${csat.toLabel} inclusive` + (plan.csatScore !== 'any' ? `, filtered to ${plan.csatScore} only` : ''),
+                        `- total ratings: ${csat.ratings.length} (${good.length} good, ${bad.length} bad)`,
+                        `- with a rating comment: ${withComment.length}; without: ${csat.ratings.length - withComment.length}`,
+                        `- rated tickets: ${csat.ratings.map(r => '#' + r.ticket_id).join(', ') || '(none)'}`,
+                        withComment.length ? `- the ones carrying a comment: ${withComment.map(r => '#' + r.ticket_id).join(', ')}` : '',
+                        `Use these counts verbatim. Do not recount from the ticket records below and do not cite any ticket not listed here.`
+                    ].filter(Boolean).join('\n');
+
+                    UI.aiSearchInterpreted.innerText = ` — CSAT via Satisfaction Ratings API: ${csat.agentLabel}, ${csat.fromLabel} to ${csat.toLabel}`;
+                    UI.aiSearchStatus.innerText = `${csat.ratings.length} rating(s) — ${good.length} good, ${bad.length} bad`;
+
+                    if (csat.ratings.length === 0) {
+                        setAiChatThinking(null);
+                        const answer = `No satisfaction ratings found for ${csat.agentLabel} between ${csat.fromLabel} and ${csat.toLabel}.`;
+                        aiChatHistory.push({ role: 'user', text: message });
+                        aiChatHistory.push({ role: 'assistant', text: answer });
+                        appendAiChatBubble('assistant', answer);
+                        return;
+                    }
+                }
+
                 let truncated = false;
                 if (plan.action === 'search') {
                     setAiChatThinking('Searching Zendesk…');
@@ -4959,7 +5099,9 @@ Agent's question: "${message}"`;
                     return;
                 }
 
-                if (plan.listOnly) {
+                // Not for CSAT: even a "just list them" phrasing should still get the
+                // authoritative good/bad/comment counts rather than a bare row count.
+                if (plan.listOnly && plan.action !== 'csat') {
                     setAiChatThinking(null);
                     const count = aiSearchCache.length;
                     const answer = `Found ${count} ticket${count === 1 ? '' : 's'} — listed in the results table below${truncated ? ' (capped; narrow the question to see more)' : ''}.`;
@@ -4979,7 +5121,7 @@ Agent's question: "${message}"`;
                 // On a "reuse" turn no new queries ran, so pass the ones that actually
                 // produced the loaded set -- otherwise the answer has no way to know which
                 // date range it is describing.
-                const answer = await answerAiChatQuestion(message, aiSearchCache, countContext, aiSearchLastQueries);
+                const answer = await answerAiChatQuestion(message, aiSearchCache, csatContext || countContext, aiSearchLastQueries, !!csatContext);
                 setAiChatThinking(null);
 
                 aiChatHistory.push({ role: 'user', text: message });
