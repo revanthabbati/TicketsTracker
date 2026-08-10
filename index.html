@@ -4477,6 +4477,9 @@
 
         let aiSearchCache = [];
         let aiChatHistory = [];
+        // The queries that produced aiSearchCache. Needed so a "reuse" follow-up can still
+        // tell the answering step which date range the loaded tickets actually came from.
+        let aiSearchLastQueries = [];
 
         // Only the tail of the conversation is sent to the model -- enough for follow-ups
         // to make sense without the prompt growing without bound.
@@ -4627,8 +4630,46 @@ Respond with ONLY strict JSON, no markdown fences, no commentary:
         }
 
         // Second of the two calls: answer the question from the retrieved tickets.
-        async function answerAiChatQuestion(message, tickets, extraContext) {
+        // Counts computed here rather than left to the model. Asking it to tally a list is
+        // unreliable: it reported 6 CSATs for an agent when 4 were retrieved, two of the ids
+        // being carried over from an earlier turn's wider date range. Handing it exact
+        // figures turns the job into reporting instead of arithmetic.
+        function buildRetrievalFacts(tickets, queries) {
+            if (tickets.length === 0) return '';
+
+            const rated = tickets.filter(t => t.satisfaction_rating && t.satisfaction_rating.score
+                && t.satisfaction_rating.score !== 'unoffered' && t.satisfaction_rating.score !== 'offered');
+            const good = rated.filter(t => t.satisfaction_rating.score === 'good');
+            const bad = rated.filter(t => t.satisfaction_rating.score === 'bad');
+            const withComment = rated.filter(t => t.satisfaction_rating.comment && String(t.satisfaction_rating.comment).trim());
+
+            const byStatus = {};
+            tickets.forEach(t => { byStatus[t.status || 'unknown'] = (byStatus[t.status || 'unknown'] || 0) + 1; });
+
+            const lines = [
+                'AUTHORITATIVE FIGURES for this turn -- these were counted from the retrieved records, so use them verbatim and never state a number that disagrees with them:',
+                `- tickets retrieved: ${tickets.length}`,
+                `- their ticket numbers, and the ONLY ones you may cite: ${tickets.map(t => '#' + t.id).join(', ')}`,
+                `- by status: ${Object.entries(byStatus).map(([s, n]) => `${n} ${s}`).join(', ')}`
+            ];
+            if (rated.length > 0) {
+                lines.push(`- with a CSAT rating: ${rated.length} (${good.length} good, ${bad.length} bad)`);
+                lines.push(`- of those, ${withComment.length} left a rating comment and ${rated.length - withComment.length} left none`);
+                if (good.length) lines.push(`- good-rated: ${good.map(t => '#' + t.id).join(', ')}`);
+                if (bad.length) lines.push(`- bad-rated: ${bad.map(t => '#' + t.id).join(', ')}`);
+            } else {
+                lines.push('- none of the retrieved tickets carry a CSAT rating');
+            }
+            if (queries && queries.length) {
+                lines.push(`- retrieved with ${queries.length === 1 ? 'this query' : 'these queries'}: ${queries.join(' | ')}`);
+                lines.push('- state the date range from those queries if you mention one; do not describe a wider period than was actually searched');
+            }
+            return lines.join('\n');
+        }
+
+        async function answerAiChatQuestion(message, tickets, extraContext, queries) {
             const included = tickets.slice(0, AI_ANSWER_MAX_TICKETS);
+            const facts = buildRetrievalFacts(included, queries);
             const ticketBlocks = included.map(t => {
                 const requester = zendeskRequesterMap[t.requester_id] || {};
                 const assignee = zendeskRequesterMap[t.assignee_id] || {};
@@ -4659,10 +4700,12 @@ Respond with ONLY strict JSON, no markdown fences, no commentary:
 
 Be concise and factual. Reference tickets by their number in the form #123456 so the agent can cross-reference the results table. Use short bullet lines when listing several things. Do not invent ticket numbers, dates, or names.
 
+Never carry a ticket number over from an earlier turn in the conversation. Each turn re-runs its own search, and an earlier turn may have covered a different date range, so a ticket that isn't listed in this turn's data does not belong in this turn's answer. The conversation below is for understanding what is being asked -- not a source of ticket numbers or counts.
+
 Conversation so far:
 ${aiChatHistoryText()}
 
-${extraContext ? extraContext + '\n\n' : ''}${included.length > 0
+${extraContext ? extraContext + '\n\n' : ''}${facts ? facts + '\n\n' : ''}${included.length > 0
     ? `Ticket data (${included.length}${tickets.length > included.length ? ` of ${tickets.length} matched` : ''} ticket(s)):\n${ticketBlocks}`
     : 'No individual ticket records were loaded for this question. Answer from the figures above -- they are the complete answer, so do not say the data is missing or that details are unavailable.'}
 
@@ -4788,6 +4831,7 @@ Agent's question: "${message}"`;
         function resetAiChat() {
             aiChatHistory = [];
             aiSearchCache = [];
+            aiSearchLastQueries = [];
             UI.aiChatTranscript.innerHTML = '';
             UI.aiSearchStatus.innerText = '';
             UI.aiSearchInterpreted.innerText = '';
@@ -4850,7 +4894,7 @@ Agent's question: "${message}"`;
                             countContext += `\nEverything came back zero. Say so, quote the filters that were used, and note that a name, email or account in them may not match what Zendesk holds -- do not present zero as a confident finding.`;
                         }
                         setAiChatThinking('Writing an answer…');
-                        const answer = await answerAiChatQuestion(message, [], countContext);
+                        const answer = await answerAiChatQuestion(message, [], countContext, plan.queries);
                         setAiChatThinking(null);
                         aiChatHistory.push({ role: 'user', text: message });
                         aiChatHistory.push({ role: 'assistant', text: answer });
@@ -4893,6 +4937,7 @@ Agent's question: "${message}"`;
                     }
 
                     aiSearchCache = tickets;
+                    aiSearchLastQueries = plan.queries;
                     renderAiSearchTable();
                     UI.aiSearchStatus.innerText = `${tickets.length} ticket${tickets.length === 1 ? '' : 's'} found${truncated ? ' (truncated — narrow the question for more)' : ''}`;
 
@@ -4931,7 +4976,10 @@ Agent's question: "${message}"`;
                 }
 
                 setAiChatThinking('Writing an answer…');
-                const answer = await answerAiChatQuestion(message, aiSearchCache, countContext);
+                // On a "reuse" turn no new queries ran, so pass the ones that actually
+                // produced the loaded set -- otherwise the answer has no way to know which
+                // date range it is describing.
+                const answer = await answerAiChatQuestion(message, aiSearchCache, countContext, aiSearchLastQueries);
                 setAiChatThinking(null);
 
                 aiChatHistory.push({ role: 'user', text: message });
