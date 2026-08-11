@@ -4639,12 +4639,15 @@ Decide:
   - "csatFrom" / "csatTo": the date range as YYYY-MM-DD, inclusive. Always resolve to concrete dates; if the question gives no range, use the last 3 whole months ending today.
 - "countOnly": true if the message only asks how many (a number answers it fully). The caller then reads Zendesk's result count without downloading every ticket, so this works for very large sets.
 - "listOnly": true if the agent just wants to see the matching tickets listed, with no question to answer in prose.
+- "timeField" / "timeFrom" / "timeTo": Zendesk's created/updated/solved filters are DAY-granular only and resolve in the account's timezone, so they cannot express "since 6pm" or "between 9am and 1pm". When the question involves a time of day, still write day-level queries that form a superset (e.g. created>=2026-08-11), and additionally set "timeField" to "created", "updated" or "solved" and "timeFrom"/"timeTo" to full ISO 8601 timestamps WITH an explicit offset, e.g. "2026-08-11T18:00:00+05:30" for 6pm IST. The caller then trims the results to that exact window itself. Leave all three out ("" / "") when the question is date-level only. Use "" for timeTo to mean "up to now".
 - "needsComments": true whenever answering depends on what was actually said or done inside the tickets. That covers resolutions, what an agent replied, root cause, configuration or sample values asked for, and any judgement call about the tickets ("why is this on hold?", "which of these could be closed?", "was this ever answered?"). False only for questions fully answerable from subject, status, assignee, priority, dates, ratings or counts. Fetching comments is slow, so don't set it when the metadata already answers the question.
 
 Respond with ONLY strict JSON, no markdown fences, no commentary:
 {"action":"search","queries":["type:ticket status:open requester:jane@acme.com"],"countOnly":false,"listOnly":false,"needsComments":false}
 or for a CSAT question:
-{"action":"csat","queries":[],"csatScore":"good","csatAgentEmail":"jane@dispatchtrack.com","csatFrom":"2026-05-01","csatTo":"2026-07-31","countOnly":false,"listOnly":false,"needsComments":false}`;
+{"action":"csat","queries":[],"csatScore":"good","csatAgentEmail":"jane@dispatchtrack.com","csatFrom":"2026-05-01","csatTo":"2026-07-31","countOnly":false,"listOnly":false,"needsComments":false}
+or for a time-of-day window:
+{"action":"search","queries":["type:ticket created>=2026-08-11"],"timeField":"created","timeFrom":"2026-08-11T18:00:00+05:30","timeTo":"","countOnly":false,"listOnly":false,"needsComments":false}`;
 
             const parsed = parseGeminiJson(await callGemini(instructions));
             const validActions = ['search', 'csat', 'reuse'];
@@ -4657,7 +4660,10 @@ or for a CSAT question:
                 csatScore: ['good', 'bad', 'any'].includes(parsed.csatScore) ? parsed.csatScore : 'any',
                 csatAgentEmail: typeof parsed.csatAgentEmail === 'string' ? parsed.csatAgentEmail.trim() : '',
                 csatFrom: typeof parsed.csatFrom === 'string' ? parsed.csatFrom.trim() : '',
-                csatTo: typeof parsed.csatTo === 'string' ? parsed.csatTo.trim() : ''
+                csatTo: typeof parsed.csatTo === 'string' ? parsed.csatTo.trim() : '',
+                timeField: ['created', 'updated', 'solved'].includes(parsed.timeField) ? parsed.timeField : '',
+                timeFrom: typeof parsed.timeFrom === 'string' ? parsed.timeFrom.trim() : '',
+                timeTo: typeof parsed.timeTo === 'string' ? parsed.timeTo.trim() : ''
             };
             // "reuse" with nothing loaded would answer from an empty context, so fall back
             // to searching. Likewise a "search" with no queries is unusable.
@@ -4761,7 +4767,9 @@ or for a CSAT question:
         // unreliable: it reported 6 CSATs for an agent when 4 were retrieved, two of the ids
         // being carried over from an earlier turn's wider date range. Handing it exact
         // figures turns the job into reporting instead of arithmetic.
-        function buildRetrievalFacts(tickets, queries) {
+        // Counts must come from the FULL result set, not the capped slice that gets detail
+        // blocks -- otherwise the facts block says "retrieved: 40" next to "the count is 57".
+        function buildRetrievalFacts(tickets, queries, timeWindow, detailedCount) {
             if (tickets.length === 0) return '';
 
             const rated = tickets.filter(t => t.satisfaction_rating && t.satisfaction_rating.score
@@ -4791,15 +4799,22 @@ or for a CSAT question:
                 lines.push(`- retrieved with ${queries.length === 1 ? 'this query' : 'these queries'}: ${queries.join(' | ')}`);
                 lines.push('- state the date range from those queries if you mention one; do not describe a wider period than was actually searched');
             }
+            if (timeWindow) {
+                lines.push(`- Zendesk can only filter by whole days, so ${timeWindow.before} ticket(s) were fetched and then trimmed by exact ${timeWindow.field} time to the ${timeWindow.after} above. That trimming is already done -- the count is ${timeWindow.after}. Do NOT re-filter by time yourself and do NOT convert timestamps; each ticket below already shows its local time.`);
+                lines.push(`- window applied: ${timeWindow.field} from ${timeWindow.from || '(no lower bound)'} to ${timeWindow.to || 'now'}`);
+            }
+            if (typeof detailedCount === 'number' && detailedCount < tickets.length) {
+                lines.push(`- only the ${detailedCount} most recent have full detail blocks below, but every count and id above covers all ${tickets.length}. Use ${tickets.length} as the total.`);
+            }
             return lines.join('\n');
         }
 
         // omitFacts is set for CSAT turns, where extraContext already carries authoritative
         // figures from the ratings endpoint. Emitting a second, separately-derived set of
         // counts is what previously made the model hedge between contradictory numbers.
-        async function answerAiChatQuestion(message, tickets, extraContext, queries, omitFacts) {
+        async function answerAiChatQuestion(message, tickets, extraContext, queries, omitFacts, timeWindow) {
             const included = tickets.slice(0, AI_ANSWER_MAX_TICKETS);
-            const facts = omitFacts ? '' : buildRetrievalFacts(included, queries);
+            const facts = omitFacts ? '' : buildRetrievalFacts(tickets, queries, timeWindow, included.length);
             const ticketBlocks = included.map(t => {
                 const requester = zendeskRequesterMap[t.requester_id] || {};
                 const assignee = zendeskRequesterMap[t.assignee_id] || {};
@@ -4809,7 +4824,11 @@ or for a CSAT question:
                     `Status: ${t.status || '?'} | Priority: ${t.priority || '?'}`,
                     `Requester: ${requester.name || '?'}${requester.email ? ` <${requester.email}>` : ''}`,
                     `Assignee: ${assignee.name || 'Unassigned'}`,
-                    `Created: ${t.created_at} | Last updated: ${t.updated_at}`,
+                    // Both forms: the ISO instant, plus the same moment rendered in the
+                    // viewer's timezone. The model previously read a UTC ISO string and
+                    // reported it as local time without converting.
+                    `Created: ${t.created_at} (local: ${formatZendeskTimestampWithYear(t.created_at)})`,
+                    `Last updated: ${t.updated_at} (local: ${formatZendeskTimestampWithYear(t.updated_at)})`,
                 ];
                 if (t.jiraKeys && t.jiraKeys.length) lines.push(`Linked Jira: ${t.jiraKeys.join(', ')}`);
                 // Free -- the rating rides along on the ticket in search results, and it's
@@ -4873,6 +4892,47 @@ Agent's question: "${message}"`;
                 }
             };
             await Promise.all(Array.from({ length: Math.min(6, pending.length) }, runOne));
+        }
+
+        // Zendesk's date filters are day-granular, so a question like "since 6pm" can only be
+        // answered by over-fetching the whole day and trimming here. That trimming used to be
+        // left to the model, which got it badly wrong -- asked for tickets since 6pm IST it
+        // answered 14 of the real 57, and relabelled UTC timestamps as IST without converting
+        // them. Timezone arithmetic is not something to delegate to a language model.
+        function applyAiSearchTimeWindow(tickets, plan) {
+            if (!plan.timeField || (!plan.timeFrom && !plan.timeTo)) return { tickets, applied: null };
+
+            const fromMs = plan.timeFrom ? new Date(plan.timeFrom).getTime() : null;
+            const toMs = plan.timeTo ? new Date(plan.timeTo).getTime() : null;
+            // A malformed timestamp from the model must not silently drop everything.
+            if ((plan.timeFrom && isNaN(fromMs)) || (plan.timeTo && isNaN(toMs))) {
+                console.warn('AI Search: unusable time window, ignoring', plan.timeFrom, plan.timeTo);
+                return { tickets, applied: null };
+            }
+
+            const fieldKey = { created: 'created_at', updated: 'updated_at', solved: 'solved_at' }[plan.timeField];
+            const kept = tickets.filter(t => {
+                // Search results carry no solved_at, so fall back to updated_at, which for a
+                // solved/closed ticket is the closest thing available.
+                const raw = t[fieldKey] || (plan.timeField === 'solved' ? t.updated_at : null);
+                if (!raw) return false;
+                const ms = new Date(raw).getTime();
+                if (isNaN(ms)) return false;
+                if (fromMs !== null && ms < fromMs) return false;
+                if (toMs !== null && ms > toMs) return false;
+                return true;
+            });
+
+            return {
+                tickets: kept,
+                applied: {
+                    field: plan.timeField,
+                    from: plan.timeFrom,
+                    to: plan.timeTo,
+                    before: tickets.length,
+                    after: kept.length
+                }
+            };
         }
 
         // Cheap path for "how many..." questions: Zendesk's search response carries a
@@ -5077,6 +5137,7 @@ Agent's question: "${message}"`;
                 }
 
                 let truncated = false;
+                let timeWindowApplied = null;
                 if (plan.action === 'search') {
                     setAiChatThinking('Searching Zendesk…');
                     // Tolerate individual query failures. The planner is now asked to guess
@@ -5093,7 +5154,11 @@ Agent's question: "${message}"`;
                     truncated = searchResults.some(r => r.truncated);
                     const byId = new Map();
                     searchResults.forEach(r => r.results.forEach(t => { if (t.id != null) byId.set(t.id, t); }));
-                    const tickets = [...byId.values()].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+                    const deduped = [...byId.values()].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+                    const windowed = applyAiSearchTimeWindow(deduped, plan);
+                    const tickets = windowed.tickets;
+                    timeWindowApplied = windowed.applied;
 
                     const ids = [...new Set(tickets.flatMap(t => [t.requester_id, t.assignee_id]).filter(Boolean))]
                         .filter(id => !(id in zendeskRequesterMap));
@@ -5109,7 +5174,9 @@ Agent's question: "${message}"`;
                     aiSearchCache = tickets;
                     aiSearchLastQueries = plan.queries;
                     renderAiSearchTable();
-                    UI.aiSearchStatus.innerText = `${tickets.length} ticket${tickets.length === 1 ? '' : 's'} found${truncated ? ' (truncated — narrow the question for more)' : ''}`;
+                    UI.aiSearchStatus.innerText = `${tickets.length} ticket${tickets.length === 1 ? '' : 's'} found`
+                        + (timeWindowApplied ? ` (trimmed from ${timeWindowApplied.before} by exact ${timeWindowApplied.field} time)` : '')
+                        + (truncated ? ' (truncated — narrow the question for more)' : '');
 
                     // Not awaited: the table is already usable, and Jira links are one
                     // request per ticket, so they fill in behind the rendered rows.
@@ -5151,7 +5218,7 @@ Agent's question: "${message}"`;
                 // On a "reuse" turn no new queries ran, so pass the ones that actually
                 // produced the loaded set -- otherwise the answer has no way to know which
                 // date range it is describing.
-                const answer = await answerAiChatQuestion(message, aiSearchCache, csatContext || countContext, aiSearchLastQueries, !!csatContext);
+                const answer = await answerAiChatQuestion(message, aiSearchCache, csatContext || countContext, aiSearchLastQueries, !!csatContext, timeWindowApplied);
                 setAiChatThinking(null);
 
                 aiChatHistory.push({ role: 'user', text: message });
