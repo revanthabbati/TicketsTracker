@@ -1184,6 +1184,10 @@
             activities: [],
             queueIdx: 0,
             settings: {},
+            // Ids an admin has deliberately deleted. Needed because a signed-in session can
+            // restore its own missing account (see the snapshot handler) -- without this list
+            // that self-heal would happily undo real deletions.
+            deletedUserIds: [],
 
             // Writes ONLY the top-level fields named in `fields` (e.g. commit(['agents'])),
             // instead of blindly overwriting the whole document every time. This matters
@@ -1260,6 +1264,46 @@
                     if (freshSelf) {
                         State.currentUser = freshSelf;
                         localStorage.setItem('ent_v14_currUser', JSON.stringify(State.currentUser));
+                    } else if (State.users.length > 0) {
+                        // The signed-in account isn't in the users list. Five accounts were
+                        // lost this way to the old whole-array overwrite, and because
+                        // currentUser is restored from localStorage and was never checked, the
+                        // affected people carried on working while being invisible to admins.
+                        //
+                        // The session holds the complete record (id, email, password, role,
+                        // permissions), so rather than signing them out and destroying the only
+                        // remaining copy, put it back. Read deletedUserIds from the snapshot
+                        // rather than State, since State is populated further down and would
+                        // still be empty on the first snapshot.
+                        const deletedIds = data.deletedUserIds || [];
+                        const self = State.currentUser;
+                        if (deletedIds.includes(self.id)) {
+                            // Deliberately removed by an admin -- honour that and end the session.
+                            console.warn('Signed-in account was deleted by an admin; ending session.', self.email);
+                            State.currentUser = null;
+                            localStorage.removeItem('ent_v14_currUser');
+                            if (window.appBooted) {
+                                showLogin();
+                                notify('Your account has been removed — contact an administrator.');
+                            }
+                        } else if (self.id && self.email && self.password) {
+                            mutateUsers(users => {
+                                // Re-checked inside the transaction: another tab may have
+                                // restored it already, and a duplicate would break login.
+                                if (users.some(u => u.id === self.id || (u.email || '').toLowerCase() === (self.email || '').toLowerCase())) return null;
+                                users.push({
+                                    id: self.id,
+                                    email: self.email,
+                                    password: self.password,
+                                    role: self.role || 'user',
+                                    zendeskAgentEmail: self.zendeskAgentEmail || '',
+                                    permissions: self.permissions || { manageAgents: false, manageShifts: false, manageTickets: false, viewCsat: false, aiSearch: false }
+                                });
+                                return users;
+                            }).then(ok => {
+                                if (ok) logAccountActivity(`Account <strong>${escapeHtml(self.email)}</strong> was restored from an active session (it was missing from the users list)`);
+                            });
+                        }
                     }
                 }
 
@@ -1283,6 +1327,7 @@
                 State.activities = data.activities || [];
                 State.queueIdx = data.queueIdx || 0;
                 State.settings = data.settings || {};
+                State.deletedUserIds = data.deletedUserIds || [];
 
                 if (!window.appBooted) {
                     bootApp();
@@ -2120,6 +2165,14 @@
                 return users.filter(u => u.id !== id);
             });
             if (!ok) return;
+
+            // Recorded so the session self-heal can tell a deliberate deletion apart from an
+            // account lost to a bug -- otherwise a deleted user's open tab would simply put
+            // itself back on the next snapshot.
+            if (!State.deletedUserIds.includes(id)) {
+                State.deletedUserIds = [...State.deletedUserIds, id];
+                State.commit(['deletedUserIds']);
+            }
 
             logAccountActivity(`Account <strong>${escapeHtml(label)}</strong> was deleted`);
             syncUI();
