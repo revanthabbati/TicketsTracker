@@ -1135,7 +1135,7 @@
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
-        import { getFirestore, doc, setDoc, updateDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
+        import { getFirestore, doc, setDoc, updateDoc, onSnapshot, runTransaction } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 
         // =================================================================================
         // FIREBASE CONFIGURATION
@@ -1228,18 +1228,23 @@
             if (snapshot.exists()) {
                 const data = snapshot.data();
                 
-                // DATA RECOVERY: Force create Master Admin if users array is empty in original db
+                // DATA RECOVERY: seed the Master Admin only if the stored users array is truly
+                // empty, so there is always a way back in. This deliberately no longer writes
+                // via commit(['users']) -- that overwrote the whole array from local memory,
+                // meaning a single snapshot that momentarily looked empty could flatten every
+                // account. mutateUsers re-reads inside a transaction and adds the admin only
+                // if it is still genuinely absent.
                 let dbUsers = data.users || [];
                 if (dbUsers.length === 0) {
-                    dbUsers = [{ 
-                        id: 'admin-1', 
-                        email: 'revanth.abbati@dispatchtrack.com', 
-                        password: 'Create@32', 
+                    const masterAdmin = {
+                        id: 'admin-1',
+                        email: 'revanth.abbati@dispatchtrack.com',
+                        password: 'Create@32',
                         role: 'admin',
                         permissions: { manageAgents: true, manageShifts: true, manageTickets: true }
-                    }];
-                    State.users = dbUsers;
-                    State.commit(['users']);
+                    };
+                    dbUsers = [masterAdmin];
+                    mutateUsers(users => (users.length === 0 ? [masterAdmin] : null));
                 }
 
                 State.users = dbUsers.map(u => ({
@@ -2012,38 +2017,55 @@
             }
         };
 
-        function submitEditUser(e) {
+        async function submitEditUser(e) {
             e.preventDefault();
             const id = UI.editUserId.value;
-            const user = State.users.find(u => u.id === id);
-            if (user) {
-                user.email = UI.editUserEmail.value.trim().toLowerCase();
-                user.role = UI.editUserRole.value;
-                user.zendeskAgentEmail = UI.editUserZendesk.value.trim();
-                user.permissions = {
-                    manageAgents: UI.editPermAgents.checked,
-                    manageShifts: UI.editPermShifts.checked,
-                    manageTickets: UI.editPermTickets.checked,
-                    viewCsat: UI.editPermCsat.checked,
-                    aiSearch: UI.editPermAiSearch.checked
-                };
-                State.commit(['users']);
-                syncUI();
-                window.closeModals();
-                notify("User account updated.");
-            }
+            const email = UI.editUserEmail.value.trim().toLowerCase();
+            const role = UI.editUserRole.value;
+            const zendeskAgentEmail = UI.editUserZendesk.value.trim();
+            const permissions = {
+                manageAgents: UI.editPermAgents.checked,
+                manageShifts: UI.editPermShifts.checked,
+                manageTickets: UI.editPermTickets.checked,
+                viewCsat: UI.editPermCsat.checked,
+                aiSearch: UI.editPermAiSearch.checked
+            };
+
+            const ok = await mutateUsers(users => {
+                const user = users.find(u => u.id === id);
+                if (!user) return null;
+                user.email = email;
+                user.role = role;
+                user.zendeskAgentEmail = zendeskAgentEmail;
+                user.permissions = permissions;
+                return users;
+            });
+            if (!ok) return;
+
+            logAccountActivity(`Account <strong>${escapeHtml(email)}</strong> was updated (role: ${escapeHtml(role)})`);
+            syncUI();
+            window.closeModals();
+            notify("User account updated.");
         }
 
-        function submitResetPass(e) {
+        async function submitResetPass(e) {
             e.preventDefault();
             const id = UI.resetPassId.value;
-            const user = State.users.find(u => u.id === id);
-            if (user) {
-                user.password = UI.resetPassInput.value.trim();
-                State.commit(['users']);
-                window.closeModals();
-                notify(`Password reset for ${user.email.split('@')[0]}.`);
-            }
+            const newPass = UI.resetPassInput.value.trim();
+
+            let label = '';
+            const ok = await mutateUsers(users => {
+                const user = users.find(u => u.id === id);
+                if (!user) return null;
+                user.password = newPass;
+                label = (user.email || '').split('@')[0];
+                return users;
+            });
+            if (!ok) return;
+
+            logAccountActivity(`Password was reset for <strong>${escapeHtml(label)}</strong>`);
+            window.closeModals();
+            notify(`Password reset for ${label}.`);
         }
 
         window.openChangePasswordModal = function() {
@@ -2053,7 +2075,10 @@
             UI.modalChangePassword.classList.add('active');
         };
 
-        function submitChangePassword(e) {
+        // This is the write that most likely destroyed the five missing accounts: it's
+        // available to every logged-in user, and it used to push the whole users array back
+        // from this browser's memory. Now it touches only its own record.
+        async function submitChangePassword(e) {
             e.preventDefault();
             const current = UI.changePassCurrent.value;
             const newPass = UI.changePassNew.value.trim();
@@ -2066,20 +2091,37 @@
                 return notify("New password and confirmation don't match.");
             }
 
-            const user = State.users.find(u => u.id === State.currentUser.id);
-            if (!user) return notify("Could not find your account.");
+            const myId = State.currentUser.id;
+            let missing = false;
+            const ok = await mutateUsers(users => {
+                const user = users.find(u => u.id === myId);
+                if (!user) { missing = true; return null; }
+                user.password = newPass;
+                return users;
+            });
+            if (missing) return notify("Could not find your account.");
+            if (!ok) return;
 
-            user.password = newPass;
             State.currentUser.password = newPass;
-            State.commit(['users']);
+            localStorage.setItem('ent_v14_currUser', JSON.stringify(State.currentUser));
+            logAccountActivity(`<strong>${escapeHtml((State.currentUser.email || '').split('@')[0])}</strong> changed their own password`);
             window.closeModals();
             notify("Password updated.");
         }
 
-        window.confirmDeleteUser = function() {
+        window.confirmDeleteUser = async function() {
             const id = UI.deleteUserId.value;
-            State.users = State.users.filter(u => u.id !== id);
-            State.commit(['users']);
+
+            let label = '';
+            const ok = await mutateUsers(users => {
+                const user = users.find(u => u.id === id);
+                if (!user) return null;
+                label = user.email || id;
+                return users.filter(u => u.id !== id);
+            });
+            if (!ok) return;
+
+            logAccountActivity(`Account <strong>${escapeHtml(label)}</strong> was deleted`);
             syncUI();
             window.closeModals();
             notify("User permanently deleted.");
@@ -2340,34 +2382,43 @@
         }
 
         /** --- CORE ACTIONS --- **/
-        function processAddUser(e) {
+        async function processAddUser(e) {
             e.preventDefault();
             // Lowercased to match handleLogin's case-insensitive comparison -- otherwise two
             // differently-cased emails could both exist as "distinct" users yet collide at login.
             const email = UI.inputUserEmail.value.trim().toLowerCase();
             const pass = UI.inputUserPass.value.trim();
             const zendeskAgentEmail = UI.inputUserZendesk.value.trim();
+            const permissions = {
+                manageAgents: UI.inputPermAgents.checked,
+                manageShifts: UI.inputPermShifts.checked,
+                manageTickets: UI.inputPermTickets.checked,
+                viewCsat: UI.inputPermCsat.checked,
+                aiSearch: UI.inputPermAiSearch.checked
+            };
 
-            if (State.users.some(u => u.email.toLowerCase() === email)) {
-                notify("A user with this email already exists.");
-                return;
-            }
-
-            State.users.push({
-                id: crypto.randomUUID(),
-                email: email,
-                password: pass,
-                role: 'user',
-                zendeskAgentEmail: zendeskAgentEmail,
-                permissions: {
-                    manageAgents: UI.inputPermAgents.checked,
-                    manageShifts: UI.inputPermShifts.checked,
-                    manageTickets: UI.inputPermTickets.checked,
-                    viewCsat: UI.inputPermCsat.checked,
-                    aiSearch: UI.inputPermAiSearch.checked
+            let rejected = null;
+            const ok = await mutateUsers(users => {
+                // Re-checked inside the transaction against the live list, so two admins
+                // adding the same email at once can't both succeed.
+                if (users.some(u => (u.email || '').toLowerCase() === email)) {
+                    rejected = 'A user with this email already exists.';
+                    return null;
                 }
+                users.push({
+                    id: crypto.randomUUID(),
+                    email: email,
+                    password: pass,
+                    role: 'user',
+                    zendeskAgentEmail: zendeskAgentEmail,
+                    permissions: permissions
+                });
+                return users;
             });
-            State.commit(['users']);
+            if (rejected) return notify(rejected);
+            if (!ok) return;
+
+            logAccountActivity(`Account <strong>${escapeHtml(email)}</strong> was created`);
             UI.inputUserEmail.value = '';
             UI.inputUserPass.value = '';
             UI.inputUserZendesk.value = '';
@@ -2753,6 +2804,44 @@
 
         function shortTicketRef(link) {
             return (link || '').split('/').pop().substring(0, 8) || 'Ticket';
+        }
+
+        // Users are the one array where a whole-document overwrite has actually destroyed
+        // data: five accounts (tarun.bodipu, akash.pandit, ganesh.ingle, saikiran.koyalkar,
+        // suman) vanished because State.commit(['users']) writes the array wholesale from a
+        // single browser's memory. Any tab holding a stale list wipes everyone missing from
+        // it -- and Change Password, which every user has, is one of those writes.
+        //
+        // So every user mutation goes through a transaction that re-reads the live array and
+        // applies just its own change. A stale tab can now only lose its own edit, never
+        // somebody else's account. Callers get the fresh array back via State.users.
+        async function mutateUsers(apply) {
+            try {
+                const result = await runTransaction(db, async (tx) => {
+                    const snap = await tx.get(docRef);
+                    const live = (snap.exists() && snap.data().users) || [];
+                    // Deep-ish copy so a rejecting apply() can't leave the live array mutated.
+                    const next = apply(live.map(u => ({ ...u, permissions: { ...(u.permissions || {}) } })));
+                    if (!next) return null;
+                    if (snap.exists()) tx.update(docRef, { users: next });
+                    else tx.set(docRef, { users: next }, { merge: true });
+                    return next;
+                });
+                if (!result) return false;
+                State.users = result;
+                return true;
+            } catch (err) {
+                console.error('User update failed:', err);
+                notify('Could not save the account change — check the console.');
+                return false;
+            }
+        }
+
+        // Account changes were previously invisible: logActivity was never called for any of
+        // them, which is why the five deletions left no trace at all.
+        function logAccountActivity(text) {
+            logActivity('Account Admin', text);
+            State.commit(['activities']);
         }
 
         // Who is performing the action right now. Stored on ticket records so the History
