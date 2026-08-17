@@ -306,7 +306,7 @@
                                 <button type="button" class="btn btn-outline" id="tab-history-reassigned" style="padding: 0.5rem 1.1rem; font-size: 0.85rem;" onclick="window.switchHistoryTab('reassigned')">Reassigned <span id="history-reassigned-count"></span></button>
                             </div>
                         </div>
-                        <div id="history-assigned-wrap" style="max-height: 500px; overflow-y: auto;">
+                        <div id="history-assigned-wrap" class="table-scroll" style="max-height: 500px; overflow-y: auto;">
                             <table id="history-data-table">
                                 <thead>
                                     <tr>
@@ -322,7 +322,7 @@
                                 <tbody id="table-history"></tbody>
                             </table>
                         </div>
-                        <div id="history-reassigned-wrap" class="hidden" style="max-height: 500px; overflow-y: auto;">
+                        <div id="history-reassigned-wrap" class="hidden table-scroll" style="max-height: 500px; overflow-y: auto;">
                             <table>
                                 <thead>
                                     <tr>
@@ -393,7 +393,7 @@
 
                         <div class="panel" id="roster-table-panel">
                             <div class="panel-header"><h2>Active Agents</h2></div>
-                            <div style="max-height: 500px; overflow-y: auto;">
+                            <div class="table-scroll" style="max-height: 500px; overflow-y: auto;">
                                 <table>
                                     <thead>
                                         <tr>
@@ -506,7 +506,7 @@
                                     <button class="btn btn-outline" id="btn-export-shifts-pdf" style="padding: 0.3rem 0.8rem; font-size: 0.75rem;">Export PDF</button>
                                 </div>
                             </div>
-                            <div style="max-height: 500px; overflow-y: auto;">
+                            <div class="table-scroll" style="max-height: 500px; overflow-y: auto;">
                                 <table>
                                     <thead>
                                         <tr>
@@ -559,7 +559,7 @@
                                 <button class="btn btn-outline" id="btn-refresh-zendesk" style="padding: 0.4rem 1rem; font-size: 0.8rem;">Refresh</button>
                             </div>
                         </div>
-                        <div style="max-height: 600px; overflow-y: auto;">
+                        <div class="table-scroll" style="max-height: 600px; overflow-y: auto;">
                             <table>
                                 <thead>
                                     <tr>
@@ -586,7 +586,7 @@
                                 <button class="btn btn-outline" id="btn-refresh-suspended" style="padding: 0.4rem 1rem; font-size: 0.8rem;">Refresh</button>
                             </div>
                         </div>
-                        <div style="max-height: 600px; overflow-y: auto;">
+                        <div class="table-scroll" style="max-height: 600px; overflow-y: auto;">
                             <table>
                                 <thead>
                                     <tr>
@@ -615,7 +615,7 @@
                         <div class="panel-body" style="padding-top: 0; padding-bottom: 0.5rem;">
                             <span class="input-hint">Support agents currently marked Offline in the Agents tab, and their tickets still sitting in the <strong>open</strong> status. Reassign to move one to an available agent.</span>
                         </div>
-                        <div style="max-height: 600px; overflow-y: auto;">
+                        <div class="table-scroll" style="max-height: 600px; overflow-y: auto;">
                             <table>
                                 <thead>
                                     <tr>
@@ -671,7 +671,7 @@
                                 <span style="color:var(--text-muted);">to</span>
                                 <input type="datetime-local" id="csat-end" class="input-control" style="padding: 0.3rem; width: auto;">
                             </div>
-                            <div style="max-height: 600px; overflow-y: auto;">
+                            <div class="table-scroll" style="max-height: 600px; overflow-y: auto;">
                                 <table>
                                     <thead>
                                         <tr>
@@ -729,7 +729,7 @@
                             </div>
                         </div>
                         <div class="panel-body" style="padding-top: 0.5rem;">
-                            <div style="max-height: 600px; overflow-y: auto;">
+                            <div class="table-scroll" style="max-height: 600px; overflow-y: auto;">
                                 <table>
                                     <thead>
                                         <tr>
@@ -794,7 +794,7 @@
 
                         <div class="panel">
                             <div class="panel-header"><h2>System Users</h2></div>
-                            <div style="max-height: 500px; overflow-y: auto;">
+                            <div class="table-scroll" style="max-height: 500px; overflow-y: auto;">
                                 <table>
                                     <thead>
                                         <tr>
@@ -2890,6 +2890,33 @@
             }
         }
 
+        // Full hover text for a reassigned ticket: every hop it has been through, oldest
+        // first. Records created before reassignHistory existed only have the latest hop in
+        // the flat fields, so those are synthesised into a single line rather than showing
+        // nothing.
+        function buildReassignTooltip(t) {
+            const hops = (t.reassignHistory && t.reassignHistory.length)
+                ? t.reassignHistory
+                : (t.reassignedFrom ? [{ from: t.reassignedFrom, to: t.agentName, by: t.reassignedBy, date: t.reassignedDate, time: t.reassignedTime }] : []);
+            if (hops.length === 0) return '';
+
+            const lines = hops.map((h, i) => {
+                const when = [h.date, h.time].filter(Boolean).join(' ');
+                return `${i + 1}. ${h.from || '?'} → ${h.to || '?'}`
+                    + (h.by ? `  (by ${formatUserLabel(h.by)}` + (when ? `, ${when})` : ')') : (when ? `  (${when})` : ''));
+            });
+
+            const header = hops.length === 1
+                ? 'Reassignment history:'
+                : `Reassignment history — ${hops.length} moves:`;
+            // Older records only kept the latest hop, so be honest that earlier ones are lost
+            // rather than implying this is the complete chain.
+            const partial = (!t.reassignHistory || !t.reassignHistory.length) && (t.reassignCount || 0) > 1
+                ? `\n(only the most recent of ${t.reassignCount} moves was recorded for this ticket)`
+                : '';
+            return `${header}\n${lines.join('\n')}${partial}`;
+        }
+
         // Account changes were previously invisible: logActivity was never called for any of
         // them, which is why the five deletions left no trace at all.
         function logAccountActivity(text) {
@@ -2954,9 +2981,20 @@
             existingTicket.reassignedBy = currentUserEmail();
             existingTicket.reassignedDate = getLocalDateString();
             existingTicket.reassignedTime = getFormattedTime();
-            // A ticket bounced repeatedly is worth being able to see, so count rather than
-            // just flag. Only the most recent hop's from/by/when is kept.
             existingTicket.reassignCount = (existingTicket.reassignCount || 0) + 1;
+            // The flat reassignedFrom/By/Date/Time fields above only ever describe the LATEST
+            // hop, so a ticket passed around three times lost the middle of its story. Keep
+            // the full chain too, which is what the hover tooltip reads.
+            existingTicket.reassignHistory = [
+                ...(existingTicket.reassignHistory || []),
+                {
+                    from: oldAgentName,
+                    to: newAgent.name,
+                    by: currentUserEmail(),
+                    date: getLocalDateString(),
+                    time: getFormattedTime()
+                }
+            ];
             if (extraFields) Object.assign(existingTicket, extraFields);
             logActivity(newAgent.name, `<strong>#${shortTicketRef(existingTicket.link)}</strong> was reassigned from <strong>${oldAgentName}</strong> to <strong>${newAgent.name}</strong>`);
         }
@@ -3389,11 +3427,7 @@
                 let reassignedBadge = '';
                 if (t.reassignedFrom) {
                     const times = t.reassignCount > 1 ? ` &times;${t.reassignCount}` : '';
-                    const detail = `Reassigned from ${t.reassignedFrom}`
-                        + (t.reassignedBy ? ` by ${formatUserLabel(t.reassignedBy)}` : '')
-                        + (t.reassignedDate ? ` on ${t.reassignedDate} ${t.reassignedTime || ''}` : '')
-                        + (t.reassignCount > 1 ? ` (${t.reassignCount} reassignments in total)` : '');
-                    reassignedBadge = ` <span class="priority-badge" style="background: rgba(245, 158, 11, 0.15); color: #f59e0b;" title="${escapeHtml(detail)}">Reassigned${times}</span>`;
+                    reassignedBadge = ` <span class="priority-badge" style="background: rgba(245, 158, 11, 0.15); color: #f59e0b; cursor: help;" title="${escapeHtml(buildReassignTooltip(t))}">Reassigned${times}</span>`;
                 }
 
                 // For a reassigned ticket the person who put it with the CURRENT agent is the
@@ -3445,12 +3479,13 @@
                         <button class="btn-icon" title="Edit Ticket" onclick="window.openEditTicketModal('${t.id}')"><svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg></button>
                     </td>` : '';
 
+                const tooltip = escapeHtml(buildReassignTooltip(t));
                 const times = t.reassignCount > 1
-                    ? ` <span class="badge-shift" style="color: #f59e0b;" title="Reassigned ${t.reassignCount} times in total; only the latest move is shown">&times;${t.reassignCount}</span>`
+                    ? ` <span class="badge-shift" style="color: #f59e0b; cursor: help;" title="${tooltip}">&times;${t.reassignCount}</span>`
                     : '';
 
                 UI.tableHistoryReassigned.insertAdjacentHTML('beforeend', `
-                    <tr>
+                    <tr title="${tooltip}">
                         <td class="link-cell"><a href="${t.link}" target="_blank">#${escapeHtml(shortTicketRef(t.link))}</a>${times}</td>
                         <td style="color: var(--text-muted);">${escapeHtml(t.reassignedFrom || '—')}</td>
                         <td style="font-weight: 600;">${escapeHtml(t.agentName || '—')}</td>
