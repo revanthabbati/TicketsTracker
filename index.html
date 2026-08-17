@@ -291,11 +291,6 @@
                                 <input type="date" id="filter-date-start" class="input-control" style="padding: 0.4rem 1rem; width: auto; font-weight: 500;">
                                 <span style="color: var(--text-muted); font-size: 0.85rem; font-weight: 500;">to</span>
                                 <input type="date" id="filter-date-end" class="input-control" style="padding: 0.4rem 1rem; width: auto; font-weight: 500;">
-                                <select id="filter-reassigned" class="input-control" style="padding: 0.4rem 1rem; width: auto; font-weight: 500;">
-                                    <option value="">All Tickets</option>
-                                    <option value="yes">Reassigned Only</option>
-                                    <option value="no">Never Reassigned</option>
-                                </select>
 
                                 <div class="data-controls" style="margin-left: auto;">
                                     <button class="btn btn-outline" id="btn-export-csv" style="padding: 0.4rem 1rem; font-size: 0.8rem;">Export CSV</button>
@@ -305,7 +300,13 @@
                                 </div>
                             </div>
                         </div>
-                        <div style="max-height: 500px; overflow-y: auto;">
+                        <div class="panel-body" style="padding-top: 0; padding-bottom: 0;">
+                            <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                                <button type="button" class="btn btn-primary" id="tab-history-assigned" style="padding: 0.5rem 1.1rem; font-size: 0.85rem;" onclick="window.switchHistoryTab('assigned')">Assigned</button>
+                                <button type="button" class="btn btn-outline" id="tab-history-reassigned" style="padding: 0.5rem 1.1rem; font-size: 0.85rem;" onclick="window.switchHistoryTab('reassigned')">Reassigned <span id="history-reassigned-count"></span></button>
+                            </div>
+                        </div>
+                        <div id="history-assigned-wrap" style="max-height: 500px; overflow-y: auto;">
                             <table id="history-data-table">
                                 <thead>
                                     <tr>
@@ -319,6 +320,22 @@
                                     </tr>
                                 </thead>
                                 <tbody id="table-history"></tbody>
+                            </table>
+                        </div>
+                        <div id="history-reassigned-wrap" class="hidden" style="max-height: 500px; overflow-y: auto;">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Ticket</th>
+                                        <th>Reassigned From</th>
+                                        <th>Reassigned To</th>
+                                        <th>Reassigned By</th>
+                                        <th>Date</th>
+                                        <th>Timestamp</th>
+                                        <th class="perm-manage-tickets" style="text-align: right;">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="table-history-reassigned"></tbody>
                             </table>
                         </div>
                     </div>
@@ -1367,7 +1384,12 @@
             filterAgent: document.getElementById('filter-agent'),
             filterDateStart: document.getElementById('filter-date-start'),
             filterDateEnd: document.getElementById('filter-date-end'),
-            filterReassigned: document.getElementById('filter-reassigned'),
+            tabHistoryAssigned: document.getElementById('tab-history-assigned'),
+            tabHistoryReassigned: document.getElementById('tab-history-reassigned'),
+            historyAssignedWrap: document.getElementById('history-assigned-wrap'),
+            historyReassignedWrap: document.getElementById('history-reassigned-wrap'),
+            tableHistoryReassigned: document.getElementById('table-history-reassigned'),
+            historyReassignedCount: document.getElementById('history-reassigned-count'),
             tableHistory: document.getElementById('table-history'),
             
             // Export / Import
@@ -1647,7 +1669,6 @@
             UI.filterAgent.addEventListener('change', () => { historyDrillRange = null; renderHistoryTable(); });
             UI.filterDateStart.addEventListener('change', () => { historyDrillRange = null; renderHistoryTable(); });
             UI.filterDateEnd.addEventListener('change', () => { historyDrillRange = null; renderHistoryTable(); });
-            UI.filterReassigned.addEventListener('change', renderHistoryTable);
 
             // Chart Range Listeners
             UI.chartRangeSelect.addEventListener('change', () => {
@@ -2070,17 +2091,20 @@
             const fAgent = UI.filterAgent.value;
             const fStart = UI.filterDateStart.value;
             const fEnd = UI.filterDateEnd.value;
-            const fReassigned = UI.filterReassigned.value;
+            const reassignedOnly = historyTab === 'reassigned';
 
             return State.tickets.filter(t => {
-                const matchAgent = fAgent ? t.agentId === fAgent : true;
-                const matchStart = fStart ? t.date >= fStart : true;
-                const matchEnd = fEnd ? t.date <= fEnd : true;
-                if (!matchAgent || !matchStart || !matchEnd) return false;
+                if (reassignedOnly && !t.reassignedFrom) return false;
 
-                const wasReassigned = !!t.reassignedFrom;
-                if (fReassigned === 'yes' && !wasReassigned) return false;
-                if (fReassigned === 'no' && wasReassigned) return false;
+                // On the Reassigned tab the date filter means "reassigned in this range",
+                // not "originally assigned in this range" -- the reassignment is the event
+                // being listed. Older records predating the field fall back to t.date.
+                const dateStr = reassignedOnly ? (t.reassignedDate || t.date) : t.date;
+
+                const matchAgent = fAgent ? t.agentId === fAgent : true;
+                const matchStart = fStart ? dateStr >= fStart : true;
+                const matchEnd = fEnd ? dateStr <= fEnd : true;
+                if (!matchAgent || !matchStart || !matchEnd) return false;
 
                 if (historyDrillRange) {
                     const ts = parseTicketTimestamp(t);
@@ -2097,15 +2121,24 @@
                 return;
             }
 
-            // New columns are appended, never inserted: importCSV reads the first four by
-            // position, so reordering here would silently break re-importing an export.
             let csvContent = "data:text/csv;charset=utf-8,";
-            csvContent += "Assignee,Ticket Reference,Date,Timestamp,Assigned By,Reassigned From,Reassigned By,Reassigned On\n";
 
-            results.forEach(t => {
-                const reassignedOn = t.reassignedDate ? `${t.reassignedDate} ${t.reassignedTime || ''}`.trim() : '';
-                csvContent += `"${t.agentName}","${t.link}","${t.date}","${t.time}","${t.assignedBy || ''}","${t.reassignedFrom || ''}","${t.reassignedBy || ''}","${reassignedOn}"\n`;
-            });
+            if (historyTab === 'reassigned') {
+                // A reassignment-shaped export: this one is never re-imported (importCSV is
+                // for assignment records), so the columns are ordered for reading.
+                csvContent += "Ticket,Reassigned From,Reassigned To,Reassigned By,Date,Timestamp,Times Reassigned\n";
+                results.forEach(t => {
+                    csvContent += `"${shortTicketRef(t.link)}","${t.reassignedFrom || ''}","${t.agentName || ''}","${t.reassignedBy || ''}","${t.reassignedDate || t.date || ''}","${t.reassignedTime || ''}","${t.reassignCount || 1}"\n`;
+                });
+            } else {
+                // New columns are appended, never inserted: importCSV reads the first four by
+                // position, so reordering here would silently break re-importing an export.
+                csvContent += "Assignee,Ticket Reference,Date,Timestamp,Assigned By,Reassigned From,Reassigned By,Reassigned On\n";
+                results.forEach(t => {
+                    const reassignedOn = t.reassignedDate ? `${t.reassignedDate} ${t.reassignedTime || ''}`.trim() : '';
+                    csvContent += `"${t.agentName}","${t.link}","${t.date}","${t.time}","${t.assignedBy || ''}","${t.reassignedFrom || ''}","${t.reassignedBy || ''}","${reassignedOn}"\n`;
+                });
+            }
 
             const encodedUri = encodeURI(csvContent);
             const link = document.createElement("a");
@@ -2129,7 +2162,7 @@
             const doc = new jsPDF();
             
             doc.setFontSize(16);
-            doc.text("Tickets Assignment History", 14, 15);
+            doc.text(historyTab === 'reassigned' ? "Ticket Reassignment History" : "Tickets Assignment History", 14, 15);
             
             doc.setFontSize(10);
             doc.setTextColor(100);
@@ -2138,18 +2171,32 @@
             const fEnd = UI.filterDateEnd.value || 'Today';
             doc.text(`Date Range: ${fStart} to ${fEnd}`, 14, 22);
 
-            const tableData = results.map(t => [
-                t.agentName,
-                formatUserLabel(t.assignedBy),
-                t.link,
-                t.date,
-                t.time,
-                t.reassignedFrom ? `from ${t.reassignedFrom}${t.reassignCount > 1 ? ` (x${t.reassignCount})` : ''} by ${formatUserLabel(t.reassignedBy)}` : ''
-            ]);
+            const onReassigned = historyTab === 'reassigned';
+            const head = onReassigned
+                ? [['Ticket', 'From', 'To', 'Reassigned By', 'Date', 'Timestamp', 'Times']]
+                : [['Assignee', 'Assigned By', 'Ticket Reference', 'Date', 'Timestamp', 'Reassignment']];
+            const tableData = onReassigned
+                ? results.map(t => [
+                    shortTicketRef(t.link),
+                    t.reassignedFrom || '',
+                    t.agentName || '',
+                    formatUserLabel(t.reassignedBy),
+                    t.reassignedDate || t.date || '',
+                    t.reassignedTime || '',
+                    String(t.reassignCount || 1)
+                ])
+                : results.map(t => [
+                    t.agentName,
+                    formatUserLabel(t.assignedBy),
+                    t.link,
+                    t.date,
+                    t.time,
+                    t.reassignedFrom ? `from ${t.reassignedFrom}${t.reassignCount > 1 ? ` (x${t.reassignCount})` : ''} by ${formatUserLabel(t.reassignedBy)}` : ''
+                ]);
 
             doc.autoTable({
                 startY: 28,
-                head: [['Assignee', 'Assigned By', 'Ticket Reference', 'Date', 'Timestamp', 'Reassignment']],
+                head: head,
                 body: tableData,
                 theme: 'grid',
                 styles: { fontSize: 7, cellPadding: 2, overflow: 'linebreak' },
@@ -3149,9 +3196,30 @@
             UI.filterAgent.value = currentSel;
         }
 
+        let historyTab = 'assigned';
+
+        window.switchHistoryTab = function(tab) {
+            historyTab = tab === 'reassigned' ? 'reassigned' : 'assigned';
+            const onReassigned = historyTab === 'reassigned';
+            UI.tabHistoryAssigned.classList.toggle('btn-primary', !onReassigned);
+            UI.tabHistoryAssigned.classList.toggle('btn-outline', onReassigned);
+            UI.tabHistoryReassigned.classList.toggle('btn-primary', onReassigned);
+            UI.tabHistoryReassigned.classList.toggle('btn-outline', !onReassigned);
+            UI.historyAssignedWrap.classList.toggle('hidden', onReassigned);
+            UI.historyReassignedWrap.classList.toggle('hidden', !onReassigned);
+            renderHistoryTable();
+        };
+
         function renderHistoryTable() {
+            // Badge the tab with how many reassignments exist overall, so the tab is
+            // discoverable without having to click it.
+            const totalReassigned = State.tickets.filter(t => t.reassignedFrom).length;
+            UI.historyReassignedCount.innerText = totalReassigned > 0 ? `(${totalReassigned})` : '';
+
+            if (historyTab === 'reassigned') return renderReassignedHistoryTable();
+
             const results = getFilteredTickets();
-            
+
             UI.tableHistory.innerHTML = '';
             UI.statFiltered.innerText = results.length;
 
@@ -3198,6 +3266,55 @@
                         <td>${sourceBadge}${reassignedBadge}</td>
                         <td>${t.date}</td>
                         <td style="color: var(--text-muted);">${t.time}</td>
+                        ${actionHtml}
+                    </tr>
+                `);
+            });
+        }
+
+        // The Reassigned tab answers a different question from the Assigned tab: not "who
+        // holds this ticket" but "who handed it to whom, and who did the handing". Only the
+        // most recent hop's details are stored, so a ticket reassigned more than once shows
+        // its latest move plus a count.
+        function renderReassignedHistoryTable() {
+            const results = getFilteredTickets();
+
+            UI.tableHistoryReassigned.innerHTML = '';
+            UI.statFiltered.innerText = results.length;
+
+            if (results.length === 0) {
+                UI.tableHistoryReassigned.innerHTML = `<tr><td colspan="7" style="text-align:center; color: var(--text-muted); padding: 2rem;">No reassignments match criteria.</td></tr>`;
+                return;
+            }
+
+            const user = State.currentUser;
+            const canManageTickets = user && (user.role === 'admin' || (user.permissions && user.permissions.manageTickets));
+
+            // Newest reassignment first, which is not the same order as the assigned tab.
+            const sorted = [...results].sort((a, b) => {
+                const av = `${a.reassignedDate || a.date} ${a.reassignedTime || a.time}`;
+                const bv = `${b.reassignedDate || b.date} ${b.reassignedTime || b.time}`;
+                return bv.localeCompare(av);
+            });
+
+            sorted.forEach(t => {
+                const actionHtml = canManageTickets ? `
+                    <td class="perm-manage-tickets" style="text-align: right;">
+                        <button class="btn-icon" title="Edit Ticket" onclick="window.openEditTicketModal('${t.id}')"><svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg></button>
+                    </td>` : '';
+
+                const times = t.reassignCount > 1
+                    ? ` <span class="badge-shift" style="color: #f59e0b;" title="Reassigned ${t.reassignCount} times in total; only the latest move is shown">&times;${t.reassignCount}</span>`
+                    : '';
+
+                UI.tableHistoryReassigned.insertAdjacentHTML('beforeend', `
+                    <tr>
+                        <td class="link-cell"><a href="${t.link}" target="_blank">#${escapeHtml(shortTicketRef(t.link))}</a>${times}</td>
+                        <td style="color: var(--text-muted);">${escapeHtml(t.reassignedFrom || '—')}</td>
+                        <td style="font-weight: 600;">${escapeHtml(t.agentName || '—')}</td>
+                        <td style="color: var(--text-muted);">${escapeHtml(formatUserLabel(t.reassignedBy))}</td>
+                        <td>${escapeHtml(t.reassignedDate || t.date || '')}</td>
+                        <td style="color: var(--text-muted);">${escapeHtml(t.reassignedTime || '')}</td>
                         ${actionHtml}
                     </tr>
                 `);
