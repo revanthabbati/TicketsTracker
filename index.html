@@ -794,6 +794,7 @@
 
                         <div class="panel">
                             <div class="panel-header"><h2>System Users</h2></div>
+                            <div id="missing-accounts-notice" class="hidden panel-body" style="padding-bottom: 0;"></div>
                             <div class="table-scroll" style="max-height: 500px; overflow-y: auto;">
                                 <table>
                                     <thead>
@@ -1480,6 +1481,7 @@
             inputPermCsat: document.getElementById('user-perm-csat'),
             inputPermAiSearch: document.getElementById('user-perm-ai-search'),
             tableUsers: document.getElementById('table-users'),
+            missingAccountsNotice: document.getElementById('missing-accounts-notice'),
 
             // Zendesk Queue
             statZendeskUnassigned: document.getElementById('stat-zendesk-unassigned'),
@@ -3373,7 +3375,53 @@
             notify(`Moved ${draggedAgent.name} in the roster.`);
         }
 
+        // Accounts that have demonstrably existed -- they assigned or reassigned tickets, and
+        // those records carry their email -- but are no longer in the users list. Derived from
+        // ticket data, which no client overwrite has ever touched, so it stays accurate even
+        // after the users array has been wiped. This is the only surviving evidence of who was
+        // lost once an account is gone from both `users` and `usersArchive`.
+        function getMissingAccountEmails() {
+            const existing = new Set(State.users.map(u => (u.email || '').toLowerCase()));
+            const seen = new Map();
+            State.tickets.forEach(t => {
+                [t.assignedBy, t.reassignedBy].forEach(email => {
+                    if (!email) return;
+                    const key = String(email).toLowerCase();
+                    if (existing.has(key)) return;
+                    seen.set(key, (seen.get(key) || 0) + 1);
+                });
+            });
+            return [...seen.entries()]
+                .map(([email, actions]) => ({ email, actions }))
+                .sort((a, b) => b.actions - a.actions);
+        }
+
+        function renderMissingAccountsNotice() {
+            const missing = getMissingAccountEmails();
+            if (missing.length === 0) {
+                UI.missingAccountsNotice.classList.add('hidden');
+                UI.missingAccountsNotice.innerHTML = '';
+                return;
+            }
+            const rows = missing.map(m =>
+                `<li><strong>${escapeHtml(m.email)}</strong> &mdash; ${m.actions} recorded action${m.actions === 1 ? '' : 's'}</li>`
+            ).join('');
+            UI.missingAccountsNotice.classList.remove('hidden');
+            UI.missingAccountsNotice.innerHTML = `
+                <div style="border: 1px solid rgba(245, 158, 11, 0.4); background: rgba(245, 158, 11, 0.08); border-radius: var(--radius-md); padding: 1rem 1.1rem;">
+                    <div style="font-weight: 700; color: #f59e0b; margin-bottom: 0.4rem;">${missing.length} account${missing.length === 1 ? '' : 's'} missing from this list</div>
+                    <div style="color: var(--text-muted); font-size: 0.85rem; line-height: 1.55;">
+                        These have assigned or reassigned tickets, so they existed, but they are no longer in the users list.
+                        If the person still has the tracker open in a browser they never logged out of, they only need to
+                        <strong>open the app once</strong> and their account restores itself. Otherwise recreate it above &mdash;
+                        passwords cannot be recovered.
+                    </div>
+                    <ul style="margin: 0.6rem 0 0 1.1rem; color: var(--text-main); font-size: 0.85rem;">${rows}</ul>
+                </div>`;
+        }
+
         function renderUsersTable() {
+            renderMissingAccountsNotice();
             UI.tableUsers.innerHTML = '';
             State.users.forEach(u => {
                 const roleBadge = u.role === 'admin' ? `<span class="badge" style="color: #f43f5e; background: rgba(244, 63, 94, 0.15)">Admin</span>` : `<span class="badge">User</span>`;
