@@ -1329,6 +1329,11 @@
                 State.settings = data.settings || {};
                 State.deletedUserIds = data.deletedUserIds || [];
 
+                // Checked cheaply against the snapshot we already have, so the transaction is
+                // only opened when there is genuinely something to archive or restore --
+                // snapshots fire on every ticket assignment and must stay cheap.
+                if (usersNeedHealing(data)) healUsers();
+
                 if (!window.appBooted) {
                     bootApp();
                     window.appBooted = true;
@@ -2915,6 +2920,77 @@
                 ? `\n(only the most recent of ${t.reassignCount} moves was recorded for this ticket)`
                 : '';
             return `${header}\n${lines.join('\n')}${partial}`;
+        }
+
+        // Accounts kept disappearing even after user writes became transactional, because
+        // browser tabs still running the PRE-FIX build write the whole users array from their
+        // own stale memory -- and when that copy is empty, the recovery block reseeds only the
+        // master admin. That is exactly how the list collapsed from 8 to 3 to 1. Those tabs
+        // can't be patched remotely, so the data repairs itself instead:
+        //
+        //   usersArchive -- append-only record of every account this app has ever seen.
+        //                   Old builds don't know about it, so they can't erase it.
+        //
+        // Any current-build client that spots accounts present in the archive but missing from
+        // the live array puts them back. Unlike the session-based self-heal (which only ever
+        // recovers the person currently signed in, and only when they happen to load the app)
+        // this restores everyone, from any client.
+        function usersNeedHealing(data) {
+            const users = data.users || [];
+            const archive = data.usersArchive || [];
+            const deleted = data.deletedUserIds || [];
+            const liveIds = new Set(users.map(u => u && u.id));
+            const archiveIds = new Set(archive.map(u => u && u.id));
+            const missing = archive.some(u => u && u.id && !liveIds.has(u.id) && !deleted.includes(u.id));
+            const unarchived = users.some(u => u && u.id && !archiveIds.has(u.id));
+            return missing || unarchived;
+        }
+
+        async function healUsers() {
+            try {
+                await runTransaction(db, async (tx) => {
+                    const snap = await tx.get(docRef);
+                    if (!snap.exists()) return;
+                    const d = snap.data();
+                    const users = d.users || [];
+                    const archive = d.usersArchive || [];
+                    const deleted = d.deletedUserIds || [];
+
+                    // Archive only ever grows. An account is added the first time it's seen and
+                    // never removed, so a later wipe can't take the record with it.
+                    const archiveById = new Map(archive.filter(u => u && u.id).map(u => [u.id, u]));
+                    let archiveChanged = false;
+                    users.forEach(u => {
+                        if (u && u.id && !archiveById.has(u.id)) {
+                            archiveById.set(u.id, { ...u });
+                            archiveChanged = true;
+                        }
+                    });
+
+                    const liveIds = new Set(users.map(u => u && u.id));
+                    const missing = [...archiveById.values()].filter(u =>
+                        !liveIds.has(u.id)
+                        && !deleted.includes(u.id)
+                        // Don't resurrect an id whose email has since been recreated, or login
+                        // would find two records for one address.
+                        && !users.some(x => (x.email || '').toLowerCase() === (u.email || '').toLowerCase()));
+
+                    const payload = {};
+                    if (archiveChanged) payload.usersArchive = [...archiveById.values()];
+                    if (missing.length > 0) payload.users = [...users, ...missing];
+                    if (Object.keys(payload).length === 0) return;
+
+                    tx.update(docRef, payload);
+                    return missing;
+                }).then(missing => {
+                    if (missing && missing.length) {
+                        console.warn('Restored missing accounts from archive:', missing.map(u => u.email));
+                        logAccountActivity(`${missing.length} account(s) were restored from the archive after being wiped: <strong>${escapeHtml(missing.map(u => u.email).join(', '))}</strong>`);
+                    }
+                });
+            } catch (err) {
+                console.error('User self-heal failed:', err);
+            }
         }
 
         // Account changes were previously invisible: logActivity was never called for any of
