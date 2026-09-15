@@ -62,6 +62,33 @@ the tab. With `--run` it also queries Zendesk through the usual Cloudflare proxy
 It does **not** send ticket subjects, descriptions or comment threads anywhere. It only
 exercises the planner, which never sees ticket contents.
 
+## `lines-check.js`
+
+Checks the Call Lines check-in/check-out logic, including the cases you cannot reproduce by
+clicking through the app because they need two people acting at once.
+
+```bash
+node tools/lines-check.js
+```
+
+Runs 45 assertions covering:
+
+- **seat capacity under a race** — two agents taking the last seat at the same instant, with a
+  second client deliberately committing mid-transaction. A line must never exceed its capacity.
+- **line switching** — moving to another line closes the previous session, so time is never
+  double-counted across two open sessions.
+- **check-out is idempotent** — a second check-out (another tab, or a supervisor at the same
+  moment) must not overwrite the recorded time or the name of whoever closed it.
+- **session pruning** — the 4000-session cap drops only the oldest *closed* sessions; an open
+  one is never pruned, however old, or an agent would silently lose a running session.
+- duration maths, including malformed and reversed timestamps.
+- identity resolution (user → agent record via `zendeskAgentEmail`) and the permission helper.
+- that writes touch **only** `lineSessions`/`lines` and leave `users`, `agents` and `tickets`
+  byte-identical.
+
+It reads the functions out of `index.html` at runtime, so it tests what actually ships. It
+talks to nothing — no Firestore, no Zendesk, no credentials, no production data.
+
 ## Diagnosing a bad answer in the app
 
 The app logs each planner decision to the browser console as `AI Search plan: {...}`. Nearly

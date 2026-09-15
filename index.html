@@ -62,6 +62,10 @@
                     <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
                     Shift Timings
                 </button>
+                <button class="nav-item" data-target="view-lines">
+                    <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 18v-6a9 9 0 0 1 18 0v6"></path><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"></path></svg>
+                    Call Lines
+                </button>
                 <button class="nav-item" data-target="view-zendesk-queue">
                     <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
                     Zendesk Queue
@@ -635,6 +639,192 @@
                     </div>
                 </section>
 
+                <section id="view-lines" class="view-section">
+                    <div class="view-header-flex" style="margin-bottom: 1.5rem;">
+                        <div class="page-title">
+                            <h1>Call Lines</h1>
+                            <p>Check in to a line, track live occupancy, and report on time spent on calls.</p>
+                        </div>
+                        <div class="stat-cards">
+                            <div class="stat-card blue" style="min-width:auto;">
+                                <span class="stat-label">Active Lines</span>
+                                <span class="stat-value" id="stat-lines-active">0</span>
+                            </div>
+                            <div class="stat-card green" style="min-width:auto;">
+                                <span class="stat-label">Agents On Line</span>
+                                <span class="stat-value" id="stat-lines-oncall">0</span>
+                            </div>
+                            <div class="stat-card orange" style="min-width:auto;">
+                                <span class="stat-label">Open Seats</span>
+                                <span class="stat-value" id="stat-lines-seats">0</span>
+                            </div>
+                            <div class="stat-card purple" style="min-width:auto;">
+                                <span class="stat-label">My Time Today</span>
+                                <span class="stat-value" id="stat-lines-mytime">0m</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div style="display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap;">
+                        <button type="button" class="btn btn-primary" id="tab-lines-board" style="padding: 0.6rem 1.25rem;" onclick="window.switchLinesTab('board')">Live Board</button>
+                        <button type="button" class="btn btn-outline perm-manage-lines" id="tab-lines-manage" style="padding: 0.6rem 1.25rem;" onclick="window.switchLinesTab('manage')">Manage Lines</button>
+                        <button type="button" class="btn btn-outline" id="tab-lines-reports" style="padding: 0.6rem 1.25rem;" onclick="window.switchLinesTab('reports')">Reports</button>
+                    </div>
+
+                    <div id="lines-board-panel">
+                        <div class="glow-box" id="line-my-status" style="flex-wrap: wrap; gap: 1rem;"></div>
+
+                        <div class="panel">
+                            <div class="panel-header">
+                                <h2>Live Occupancy</h2>
+                                <span id="lines-board-meta" style="font-size: 0.8rem; color: var(--text-muted);"></span>
+                            </div>
+                            <div class="panel-body" id="lines-board-grid"></div>
+                        </div>
+                    </div>
+
+                    <div id="lines-manage-panel" class="hidden">
+                        <div class="dashboard-grid">
+                            <div class="panel" style="align-self: start;">
+                                <div class="panel-header"><h2>Create Line</h2></div>
+                                <div class="panel-body">
+                                    <form id="form-line">
+                                        <div class="input-group">
+                                            <label>Line Name</label>
+                                            <input type="text" id="input-line-name" class="input-control" placeholder="Line 1" required autocomplete="off" maxlength="60">
+                                            <span class="input-hint">The label agents see when checking in &mdash; e.g. Line 1, Line 2, Escalations.</span>
+                                        </div>
+                                        <div class="input-group">
+                                            <label>Description (Optional)</label>
+                                            <input type="text" id="input-line-desc" class="input-control" placeholder="What this line covers" autocomplete="off" maxlength="120">
+                                        </div>
+                                        <div class="input-group">
+                                            <label>Seat Capacity (Optional)</label>
+                                            <input type="number" id="input-line-capacity" class="input-control" placeholder="Leave blank for unlimited" min="1" max="99" autocomplete="off">
+                                            <span class="input-hint">Check-in is blocked once the line is full.</span>
+                                        </div>
+                                        <button type="submit" class="btn btn-primary" style="width: 100%;">Create Line</button>
+                                    </form>
+                                </div>
+                            </div>
+
+                            <div class="panel">
+                                <div class="panel-header"><h2>All Lines</h2></div>
+                                <div class="table-scroll" style="max-height: 520px; overflow-y: auto;">
+                                    <table>
+                                        <thead>
+                                            <tr>
+                                                <th>Line</th>
+                                                <th>Occupancy</th>
+                                                <th>Status</th>
+                                                <th style="text-align: right;">Actions</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="table-lines"></tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="lines-reports-panel" class="hidden">
+                        <div class="panel" style="margin-bottom: 1.5rem;">
+                            <div class="panel-header">
+                                <h2>Report Filters</h2>
+                                <div class="data-controls" style="display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap; margin-left: auto;">
+                                    <button class="btn btn-outline" id="btn-lines-export-csv" style="padding: 0.4rem 1rem; font-size: 0.8rem;">Export CSV</button>
+                                    <button class="btn btn-outline" id="btn-lines-export-pdf" style="padding: 0.4rem 1rem; font-size: 0.8rem;">Export PDF</button>
+                                    <button class="btn btn-outline" id="btn-lines-export-doc" style="padding: 0.4rem 1rem; font-size: 0.8rem;">Export Word</button>
+                                </div>
+                            </div>
+                            <div class="panel-body" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem;">
+                                <div class="input-group" style="margin-bottom: 0;">
+                                    <label>From</label>
+                                    <input type="date" id="lines-report-start" class="input-control">
+                                </div>
+                                <div class="input-group" style="margin-bottom: 0;">
+                                    <label>To</label>
+                                    <input type="date" id="lines-report-end" class="input-control">
+                                </div>
+                                <div class="input-group" style="margin-bottom: 0;">
+                                    <label>Line</label>
+                                    <select id="lines-report-line" class="input-control"><option value="">All Lines</option></select>
+                                </div>
+                                <div class="input-group" style="margin-bottom: 0;">
+                                    <label>Agent</label>
+                                    <select id="lines-report-agent" class="input-control"><option value="">All Agents</option></select>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="dashboard-grid" style="grid-template-columns: 1fr; gap: 1.5rem;">
+                            <div class="panel">
+                                <div class="panel-header">
+                                    <h2>Time By Agent</h2>
+                                    <span id="lines-report-summary" style="font-size: 0.8rem; color: var(--text-muted);"></span>
+                                </div>
+                                <div class="table-scroll">
+                                    <table>
+                                        <thead>
+                                            <tr>
+                                                <th>Agent</th>
+                                                <th>Sessions</th>
+                                                <th>Total Time</th>
+                                                <th>Hours</th>
+                                                <th>Avg Session</th>
+                                                <th>Lines Worked</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="table-lines-by-agent"></tbody>
+                                    </table>
+                                </div>
+                            </div>
+
+                            <div class="panel">
+                                <div class="panel-header">
+                                    <h2>Time By Line</h2>
+                                </div>
+                                <div class="table-scroll">
+                                    <table>
+                                        <thead>
+                                            <tr>
+                                                <th>Line</th>
+                                                <th>Sessions</th>
+                                                <th>Total Time</th>
+                                                <th>Hours</th>
+                                                <th>Agents</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="table-lines-by-line"></tbody>
+                                    </table>
+                                </div>
+                            </div>
+
+                            <div class="panel">
+                                <div class="panel-header">
+                                    <h2>Session Detail</h2>
+                                    <span id="lines-detail-count" style="font-size: 0.8rem; color: var(--text-muted);"></span>
+                                </div>
+                                <div class="table-scroll" style="max-height: 560px; overflow-y: auto;">
+                                    <table>
+                                        <thead>
+                                            <tr>
+                                                <th>Agent</th>
+                                                <th>Line</th>
+                                                <th>Checked In</th>
+                                                <th>Checked Out</th>
+                                                <th>Duration</th>
+                                                <th>Ended By</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="table-lines-sessions"></tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
                 <section id="view-csat" class="view-section perm-view-csat">
                     <div class="view-header-flex" style="margin-bottom: 1.5rem;">
                         <div class="page-title">
@@ -785,6 +975,7 @@
                                             <label class="perm-check"><input type="checkbox" id="user-perm-tickets"> Can Edit/Delete Tickets</label>
                                             <label class="perm-check"><input type="checkbox" id="user-perm-csat"> Can View CSAT</label>
                                             <label class="perm-check"><input type="checkbox" id="user-perm-ai-search"> Can Use AI Search</label>
+                                            <label class="perm-check"><input type="checkbox" id="user-perm-lines"> Can Manage Call Lines</label>
                                         </div>
                                     </div>
                                     <button type="submit" class="btn btn-primary" style="width: 100%;">Create Account</button>
@@ -910,6 +1101,44 @@
         </div>
     </div>
 
+    <div id="modal-edit-line" class="modal-overlay">
+        <div class="modal-content">
+            <h2 style="font-size: 1.4rem; font-weight: 700; margin-bottom: 1.5rem;">Edit Line</h2>
+            <form id="form-edit-line">
+                <input type="hidden" id="edit-line-id">
+                <div class="input-group">
+                    <label>Line Name</label>
+                    <input type="text" id="edit-line-name" class="input-control" required autocomplete="off" maxlength="60">
+                </div>
+                <div class="input-group">
+                    <label>Description (Optional)</label>
+                    <input type="text" id="edit-line-desc" class="input-control" autocomplete="off" maxlength="120">
+                </div>
+                <div class="input-group">
+                    <label>Seat Capacity (Optional)</label>
+                    <input type="number" id="edit-line-capacity" class="input-control" placeholder="Leave blank for unlimited" min="1" max="99" autocomplete="off">
+                    <span class="input-hint">Lowering this below the number of agents currently on the line will not remove anyone &mdash; it only blocks new check-ins.</span>
+                </div>
+                <div style="display: flex; gap: 1rem; margin-top: 2rem;">
+                    <button type="button" class="btn btn-outline" style="flex: 1;" onclick="window.closeModals()">Cancel</button>
+                    <button type="submit" class="btn btn-primary" style="flex: 1;">Save Changes</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="modal-delete-line" class="modal-overlay">
+        <div class="modal-content">
+            <h2 style="font-size: 1.4rem; font-weight: 700; margin-bottom: 0.5rem; color: #f43f5e;">Delete Line</h2>
+            <p style="color: var(--text-muted); margin-bottom: 1.5rem; font-size: 0.95rem; line-height: 1.5;" id="delete-line-msg"></p>
+            <input type="hidden" id="delete-line-id">
+            <div style="display: flex; gap: 1rem;">
+                <button type="button" class="btn btn-outline" style="flex: 1;" onclick="window.closeModals()">Cancel</button>
+                <button type="button" class="btn btn-danger" style="flex: 1;" onclick="window.confirmDeleteLine()">Yes, Delete</button>
+            </div>
+        </div>
+    </div>
+
     <div id="modal-edit-user" class="modal-overlay">
         <div class="modal-content">
             <h2 style="font-size: 1.4rem; font-weight: 700; margin-bottom: 1.5rem;">Edit User Account</h2>
@@ -939,6 +1168,7 @@
                         <label class="perm-check"><input type="checkbox" id="edit-perm-tickets"> Can Edit/Delete Tickets</label>
                         <label class="perm-check"><input type="checkbox" id="edit-perm-csat"> Can View CSAT</label>
                         <label class="perm-check"><input type="checkbox" id="edit-perm-ai-search"> Can Use AI Search</label>
+                        <label class="perm-check"><input type="checkbox" id="edit-perm-lines"> Can Manage Call Lines</label>
                     </div>
                 </div>
                 <div style="display: flex; gap: 1rem; margin-top: 2rem;">
@@ -1190,6 +1420,14 @@
             // that self-heal would happily undo real deletions.
             deletedUserIds: [],
 
+            // Call-line tracking. Both are NEW top-level document fields, deliberately kept
+            // out of commit()'s field list -- every write goes through mutateDocArray() so a
+            // stale tab can never overwrite the whole array (the failure mode that destroyed
+            // five user accounts). Tabs running an older build don't name these fields in
+            // their updateDoc payloads, so they cannot erase them either.
+            lines: [],
+            lineSessions: [],
+
             // Writes ONLY the top-level fields named in `fields` (e.g. commit(['agents'])),
             // instead of blindly overwriting the whole document every time. This matters
             // because many browser tabs stay open concurrently -- a tab that hasn't picked
@@ -1329,6 +1567,8 @@
                 State.queueIdx = data.queueIdx || 0;
                 State.settings = data.settings || {};
                 State.deletedUserIds = data.deletedUserIds || [];
+                State.lines = data.lines || [];
+                State.lineSessions = data.lineSessions || [];
 
                 // Checked cheaply against the snapshot we already have, so the transaction is
                 // only opened when there is genuinely something to archive or restore --
@@ -1394,6 +1634,7 @@
             manageTicketsElements: document.querySelectorAll('.perm-manage-tickets'),
             viewCsatElements: document.querySelectorAll('.perm-view-csat'),
             aiSearchElements: document.querySelectorAll('.perm-ai-search'),
+            manageLinesElements: document.querySelectorAll('.perm-manage-lines'),
 
             statAgentsSupport: document.getElementById('stat-support'),
             statAgentsCse: document.getElementById('stat-cse'),
@@ -1482,6 +1723,49 @@
             inputPermAiSearch: document.getElementById('user-perm-ai-search'),
             tableUsers: document.getElementById('table-users'),
             missingAccountsNotice: document.getElementById('missing-accounts-notice'),
+
+            // Call Lines
+            statLinesActive: document.getElementById('stat-lines-active'),
+            statLinesOnCall: document.getElementById('stat-lines-oncall'),
+            statLinesSeats: document.getElementById('stat-lines-seats'),
+            statLinesMyTime: document.getElementById('stat-lines-mytime'),
+            tabLinesBoard: document.getElementById('tab-lines-board'),
+            tabLinesManage: document.getElementById('tab-lines-manage'),
+            tabLinesReports: document.getElementById('tab-lines-reports'),
+            panelLinesBoard: document.getElementById('lines-board-panel'),
+            panelLinesManage: document.getElementById('lines-manage-panel'),
+            panelLinesReports: document.getElementById('lines-reports-panel'),
+            lineMyStatus: document.getElementById('line-my-status'),
+            linesBoardGrid: document.getElementById('lines-board-grid'),
+            linesBoardMeta: document.getElementById('lines-board-meta'),
+            formLine: document.getElementById('form-line'),
+            inputLineName: document.getElementById('input-line-name'),
+            inputLineDesc: document.getElementById('input-line-desc'),
+            inputLineCapacity: document.getElementById('input-line-capacity'),
+            tableLines: document.getElementById('table-lines'),
+            linesReportStart: document.getElementById('lines-report-start'),
+            linesReportEnd: document.getElementById('lines-report-end'),
+            linesReportLine: document.getElementById('lines-report-line'),
+            linesReportAgent: document.getElementById('lines-report-agent'),
+            linesReportSummary: document.getElementById('lines-report-summary'),
+            tableLinesByAgent: document.getElementById('table-lines-by-agent'),
+            tableLinesByLine: document.getElementById('table-lines-by-line'),
+            tableLinesSessions: document.getElementById('table-lines-sessions'),
+            linesDetailCount: document.getElementById('lines-detail-count'),
+            btnLinesExportCsv: document.getElementById('btn-lines-export-csv'),
+            btnLinesExportPdf: document.getElementById('btn-lines-export-pdf'),
+            btnLinesExportDoc: document.getElementById('btn-lines-export-doc'),
+            modalEditLine: document.getElementById('modal-edit-line'),
+            formEditLine: document.getElementById('form-edit-line'),
+            editLineId: document.getElementById('edit-line-id'),
+            editLineName: document.getElementById('edit-line-name'),
+            editLineDesc: document.getElementById('edit-line-desc'),
+            editLineCapacity: document.getElementById('edit-line-capacity'),
+            modalDeleteLine: document.getElementById('modal-delete-line'),
+            deleteLineId: document.getElementById('delete-line-id'),
+            deleteLineMsg: document.getElementById('delete-line-msg'),
+            inputPermLines: document.getElementById('user-perm-lines'),
+            editPermLines: document.getElementById('edit-perm-lines'),
 
             // Zendesk Queue
             statZendeskUnassigned: document.getElementById('stat-zendesk-unassigned'),
@@ -1696,6 +1980,8 @@
             const toDateStr = d => `${d.getFullYear()}-${padDate(d.getMonth() + 1)}-${padDate(d.getDate())}`;
             UI.filterDateStart.value = toDateStr(todayWindow.start);
             UI.filterDateEnd.value = toDateStr(todayWindow.end);
+            UI.linesReportStart.value = toDateStr(todayWindow.start);
+            UI.linesReportEnd.value = toDateStr(todayWindow.end);
 
             setupListeners();
             initChart();
@@ -1829,6 +2115,18 @@
             // Shift Exports
             UI.btnExportShiftsCSV.addEventListener('click', exportShiftsCSV);
             UI.btnExportShiftsPDF.addEventListener('click', exportShiftsPDF);
+
+            // Call Lines
+            UI.formLine.addEventListener('submit', processAddLine);
+            UI.formEditLine.addEventListener('submit', submitEditLine);
+            UI.btnLinesExportCsv.addEventListener('click', exportLinesCsv);
+            UI.btnLinesExportPdf.addEventListener('click', exportLinesPdf);
+            UI.btnLinesExportDoc.addEventListener('click', exportLinesDoc);
+            [UI.linesReportStart, UI.linesReportEnd, UI.linesReportLine, UI.linesReportAgent]
+                .forEach(el => el.addEventListener('change', renderLinesReport));
+            // One interval for every running timer on the page; it no-ops unless the Call
+            // Lines view is actually on screen.
+            setInterval(tickLineDurations, 1000);
         }
 
         /** --- AUTHENTICATION & RBAC LOGIC --- **/
@@ -1873,6 +2171,7 @@
             const canManageTickets = isAdmin || (user.permissions && user.permissions.manageTickets);
             const canViewCsat = isAdmin || (user.permissions && user.permissions.viewCsat);
             const canAiSearch = isAdmin || (user.permissions && user.permissions.aiSearch);
+            const canManageCallLines = isAdmin || (user.permissions && user.permissions.manageLines);
 
             UI.adminElements.forEach(el => el.classList.toggle('hidden', !isAdmin));
             UI.manageAgentsElements.forEach(el => el.classList.toggle('hidden', !canManageAgents));
@@ -1880,6 +2179,7 @@
             UI.manageTicketsElements.forEach(el => el.classList.toggle('hidden', !canManageTickets));
             UI.viewCsatElements.forEach(el => el.classList.toggle('hidden', !canViewCsat));
             UI.aiSearchElements.forEach(el => el.classList.toggle('hidden', !canAiSearch));
+            UI.manageLinesElements.forEach(el => el.classList.toggle('hidden', !canManageCallLines));
 
             if (!canManageAgents) {
                 UI.rosterGrid.style.gridTemplateColumns = "1fr";
@@ -1905,6 +2205,8 @@
             UI.modalSendIr.classList.remove('active');
             UI.modalBulkSendIr.classList.remove('active');
             UI.modalChangePassword.classList.remove('active');
+            UI.modalEditLine.classList.remove('active');
+            UI.modalDeleteLine.classList.remove('active');
         };
 
         /* Ticket Modals */
@@ -2046,6 +2348,7 @@
                 UI.editPermTickets.checked = user.permissions?.manageTickets || false;
                 UI.editPermCsat.checked = user.permissions?.viewCsat || false;
                 UI.editPermAiSearch.checked = user.permissions?.aiSearch || false;
+                UI.editPermLines.checked = user.permissions?.manageLines || false;
                 UI.modalEditUser.classList.add('active');
             }
         };
@@ -2080,6 +2383,7 @@
                 manageShifts: UI.editPermShifts.checked,
                 manageTickets: UI.editPermTickets.checked,
                 viewCsat: UI.editPermCsat.checked,
+                manageLines: UI.editPermLines.checked,
                 aiSearch: UI.editPermAiSearch.checked
             };
 
@@ -2454,6 +2758,7 @@
                 manageShifts: UI.inputPermShifts.checked,
                 manageTickets: UI.inputPermTickets.checked,
                 viewCsat: UI.inputPermCsat.checked,
+                manageLines: UI.inputPermLines.checked,
                 aiSearch: UI.inputPermAiSearch.checked
             };
 
@@ -2487,6 +2792,7 @@
             UI.inputPermTickets.checked = false;
             UI.inputPermCsat.checked = false;
             UI.inputPermAiSearch.checked = false;
+            UI.inputPermLines.checked = false;
             renderUsersTable();
             notify("New user account created.");
         }
@@ -3155,6 +3461,7 @@
             populateFilters();
             renderHistoryTable(); 
             renderShiftsTable();
+            renderLinesView();
             
             if(State.currentUser && State.currentUser.role === 'admin') {
                 renderUsersTable();
@@ -3433,6 +3740,7 @@
                     if (u.permissions.manageTickets) permBadges += `<span class="badge badge-perm" style="color: #4f46e5; background:rgba(79, 70, 229, 0.15);">Tickets</span>`;
                     if (u.permissions.viewCsat) permBadges += `<span class="badge badge-perm" style="color: #10b981; background:rgba(16, 185, 129, 0.15);">CSAT</span>`;
                     if (u.permissions.aiSearch) permBadges += `<span class="badge badge-perm" style="color: #8b5cf6; background:rgba(139, 92, 246, 0.15);">AI Search</span>`;
+                    if (u.permissions.manageLines) permBadges += `<span class="badge badge-perm" style="color: #f59e0b; background:rgba(245, 158, 11, 0.15);">Call Lines</span>`;
                 }
 
                 const isSelf = State.currentUser.id === u.id;
@@ -6012,7 +6320,861 @@ Exported ${escapeHtml(formatZendeskTimestampWithYear(new Date().toISOString()))}
                 fetchCsatData();
             } else if (clickedNav.dataset.target === 'view-ai-search') {
                 UI.aiSearchPrompt.focus();
+            } else if (clickedNav.dataset.target === 'view-lines') {
+                renderLinesView();
             }
+        }
+
+        /** --- CALL LINES (AGENT LINE TRACKING) ---
+            Two new document fields, `lines` and `lineSessions`, both written ONLY through
+            mutateDocArray() below. Nothing here touches tickets, agents, users or settings,
+            and neither field is ever named in a State.commit() payload, so the module cannot
+            disturb existing data. **/
+
+        // Firestore documents are capped at 1MB and lineSessions is the one array here that
+        // grows forever. At ~20 agents checking in a few times a shift this is roughly two
+        // years of history; past it the oldest CLOSED sessions are dropped (open ones never
+        // are, or an agent would silently lose their running session).
+        const LINE_SESSION_CAP = 4000;
+        // A session still open this long after check-in is almost certainly a forgotten
+        // check-out rather than a genuinely long call, so it gets flagged for a supervisor.
+        const LINE_STALE_MS = 16 * 60 * 60 * 1000;
+
+        let linesTab = 'board';
+
+        // Generic transactional read-modify-write for one top-level array field. This is the
+        // same shape as mutateUsers: re-read the live array inside the transaction and apply
+        // only this client's change, so a tab holding a stale copy can never wipe rows it
+        // never knew about. `apply` returns the new array, or null to abort the write.
+        async function mutateDocArray(field, apply) {
+            try {
+                const result = await runTransaction(db, async (tx) => {
+                    const snap = await tx.get(docRef);
+                    const live = (snap.exists() && snap.data()[field]) || [];
+                    const next = apply(live.map(x => ({ ...x })));
+                    if (!next) return null;
+                    if (snap.exists()) tx.update(docRef, { [field]: next });
+                    else tx.set(docRef, { [field]: next }, { merge: true });
+                    return next;
+                });
+                if (!result) return false;
+                State[field] = result;
+                return true;
+            } catch (err) {
+                console.error(`Update to ${field} failed:`, err);
+                notify('Could not save that change — check the console.');
+                return false;
+            }
+        }
+
+        function canManageLines() {
+            const u = State.currentUser;
+            // Coerced, not just truthy: a user with no permissions object at all would
+            // otherwise make this return undefined rather than false.
+            return !!(u && (u.role === 'admin' || (u.permissions && u.permissions.manageLines)));
+        }
+
+        // Who the signed-in user is, in line-tracking terms. Users are linked to agent records
+        // through zendeskAgentEmail -> agent.zendeskEmail (the same join the CSAT tab uses).
+        // Someone with no agent record still gets a stable synthetic id rather than being
+        // locked out -- not being on the roster shouldn't stop you logging call time.
+        function myLineIdentity() {
+            const u = State.currentUser;
+            if (!u) return null;
+            const mapped = (u.zendeskAgentEmail || '').trim().toLowerCase();
+            const own = (u.email || '').trim().toLowerCase();
+            const agent = (mapped && State.agents.find(a => (a.zendeskEmail || '').trim().toLowerCase() === mapped))
+                || (own && State.agents.find(a => (a.zendeskEmail || '').trim().toLowerCase() === own))
+                || null;
+            return {
+                agentId: agent ? agent.id : `user:${u.id}`,
+                agentName: agent ? agent.name : (u.email || '').split('@')[0],
+                userEmail: u.email || '',
+                linked: !!agent
+            };
+        }
+
+        function lineIdentityForAgent(agentId) {
+            const agent = State.agents.find(a => a.id === agentId);
+            if (!agent) return null;
+            return { agentId: agent.id, agentName: agent.name, userEmail: agent.zendeskEmail || '', linked: true };
+        }
+
+        function lineSessionDuration(s, nowMs) {
+            const start = new Date(s.checkInAt).getTime();
+            if (isNaN(start)) return 0;
+            const end = s.checkOutAt ? new Date(s.checkOutAt).getTime() : (nowMs || Date.now());
+            return Math.max(0, end - start);
+        }
+
+        function formatLineDuration(ms) {
+            const total = Math.floor(Math.max(0, ms || 0) / 1000);
+            const h = Math.floor(total / 3600);
+            const m = Math.floor((total % 3600) / 60);
+            const s = total % 60;
+            if (h > 0) return `${h}h ${String(m).padStart(2, '0')}m`;
+            if (m > 0) return `${m}m ${String(s).padStart(2, '0')}s`;
+            return `${s}s`;
+        }
+
+        function formatLineHours(ms) {
+            return (Math.max(0, ms || 0) / 3600000).toFixed(2);
+        }
+
+        function formatLineClock(iso) {
+            if (!iso) return '—';
+            const d = new Date(iso);
+            if (isNaN(d.getTime())) return '—';
+            return d.toLocaleString('en-US', { year: 'numeric', month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true });
+        }
+
+        function openLineSessions() {
+            return (State.lineSessions || []).filter(s => s && !s.checkOutAt);
+        }
+
+        function myOpenLineSession() {
+            const me = myLineIdentity();
+            if (!me) return null;
+            return openLineSessions().find(s => s.agentId === me.agentId) || null;
+        }
+
+        function activeLines() {
+            return (State.lines || []).filter(l => l && l.isActive !== false);
+        }
+
+        function sortedLines() {
+            return [...(State.lines || [])].sort((a, b) => (a.order || 0) - (b.order || 0) || String(a.name || '').localeCompare(String(b.name || '')));
+        }
+
+        function closeLineSession(s, when, byEmail, reason) {
+            const endIso = (when instanceof Date ? when : new Date()).toISOString();
+            return {
+                ...s,
+                checkOutAt: endIso,
+                checkOutBy: byEmail || '',
+                durationMs: lineSessionDuration({ ...s, checkOutAt: endIso }),
+                endedReason: reason || 'manual'
+            };
+        }
+
+        function pruneLineSessions(sessions) {
+            if (sessions.length <= LINE_SESSION_CAP) return sessions;
+            const open = sessions.filter(s => !s.checkOutAt);
+            const closed = sessions.filter(s => s.checkOutAt)
+                .sort((a, b) => new Date(b.checkInAt).getTime() - new Date(a.checkInAt).getTime());
+            return [...open, ...closed.slice(0, Math.max(0, LINE_SESSION_CAP - open.length))];
+        }
+
+        /* --- Check in / out --- */
+
+        // Capacity and "already on a line" are both re-checked INSIDE the transaction rather
+        // than from the rendered page, so two agents clicking the last seat at the same moment
+        // can't both get in.
+        async function performLineCheckIn(line, identity, byEmail) {
+            let rejection = null;
+            let switchedFrom = null;
+            const now = new Date();
+
+            const ok = await mutateDocArray('lineSessions', sessions => {
+                const live = sessions.filter(s => s && !s.checkOutAt);
+                const mine = live.find(s => s.agentId === identity.agentId);
+
+                if (mine && mine.lineId === line.id) {
+                    rejection = `${identity.agentName} is already checked in to ${line.name}.`;
+                    return null;
+                }
+
+                const occupants = live.filter(s => s.lineId === line.id).length;
+                if (line.capacity && occupants >= line.capacity) {
+                    rejection = `${line.name} is full (${occupants}/${line.capacity} seats taken).`;
+                    return null;
+                }
+
+                let next = sessions;
+                // Moving to another line closes the previous session rather than leaving two
+                // open, so an agent's time is never double-counted across lines.
+                if (mine) {
+                    switchedFrom = mine.lineName;
+                    next = next.map(s => (s.id === mine.id ? closeLineSession(s, now, byEmail, 'switch') : s));
+                }
+
+                next = [...next, {
+                    id: crypto.randomUUID(),
+                    lineId: line.id,
+                    lineName: line.name,
+                    agentId: identity.agentId,
+                    agentName: identity.agentName,
+                    userEmail: identity.userEmail,
+                    checkInAt: now.toISOString(),
+                    checkInBy: byEmail || '',
+                    checkOutAt: null,
+                    checkOutBy: '',
+                    durationMs: 0,
+                    endedReason: ''
+                }];
+                return pruneLineSessions(next);
+            });
+
+            return { ok, rejection, switchedFrom };
+        }
+
+        async function performLineCheckOut(sessionId, byEmail, reason) {
+            let closed = null;
+            const now = new Date();
+            const ok = await mutateDocArray('lineSessions', sessions => {
+                const target = sessions.find(s => s.id === sessionId && !s.checkOutAt);
+                // Already closed by another tab or a supervisor -- nothing to do, and
+                // certainly don't overwrite the recorded check-out time.
+                if (!target) return null;
+                closed = target;
+                return sessions.map(s => (s.id === sessionId ? closeLineSession(s, now, byEmail, reason) : s));
+            });
+            return { ok, closed };
+        }
+
+        window.lineCheckIn = async function(lineId, agentId) {
+            const line = (State.lines || []).find(l => l.id === lineId);
+            if (!line) return notify('That line no longer exists.');
+            if (line.isActive === false) return notify(`${line.name} is closed for check-in.`);
+
+            const identity = agentId ? lineIdentityForAgent(agentId) : myLineIdentity();
+            if (!identity) return notify('Could not work out which agent to check in.');
+            if (agentId && !canManageLines()) return notify('You can only check yourself in.');
+
+            const { ok, rejection, switchedFrom } = await performLineCheckIn(line, identity, currentUserEmail());
+            if (rejection) return notify(rejection);
+            if (!ok) return;
+
+            // Deliberately NOT written to the shared activity feed. That feed is capped at
+            // 100 entries and exists for ticket assignments -- a dozen agents checking in and
+            // out each shift would push real assignment history off the Dashboard within
+            // minutes. Every check-in is already recorded in lineSessions with full
+            // timestamps, which is a better audit trail than a truncated feed. Only actions
+            // taken on someone ELSE's behalf are logged, since those need attribution.
+            if (agentId) {
+                logActivity(identity.agentName, `<strong>${escapeHtml(identity.agentName)}</strong> was checked in to <strong>${escapeHtml(line.name)}</strong> by a supervisor`);
+                State.commit(['activities']);
+            }
+            renderLinesView();
+            notify(switchedFrom ? `Moved to ${line.name}.` : `Checked in to ${line.name}.`);
+        };
+
+        window.lineCheckOut = async function(sessionId) {
+            const session = (State.lineSessions || []).find(s => s.id === sessionId);
+            if (!session) return notify('That session is no longer open.');
+
+            const me = myLineIdentity();
+            const isMine = me && session.agentId === me.agentId;
+            if (!isMine && !canManageLines()) return notify('You can only check yourself out.');
+
+            const { ok, closed } = await performLineCheckOut(sessionId, currentUserEmail(), isMine ? 'manual' : 'supervisor');
+            if (!ok) {
+                renderLinesView();
+                return notify('That session was already closed.');
+            }
+
+            const spent = formatLineDuration(lineSessionDuration({ ...closed, checkOutAt: new Date().toISOString() }));
+            // See lineCheckIn: routine self check-out stays out of the capped activity feed.
+            // A supervisor ending someone else's session is worth surfacing, though.
+            if (!isMine) {
+                logActivity(closed.agentName, `<strong>${escapeHtml(closed.agentName)}</strong> was checked out of <strong>${escapeHtml(closed.lineName)}</strong> by a supervisor after ${escapeHtml(spent)}`);
+                State.commit(['activities']);
+            }
+            renderLinesView();
+            notify(`Checked out of ${closed.lineName} — ${spent} logged.`);
+        };
+
+        window.lineCheckInSelected = function(lineId, selectEl) {
+            const agentId = selectEl && selectEl.value;
+            if (!agentId) return;
+            selectEl.value = '';
+            window.lineCheckIn(lineId, agentId);
+        };
+
+        window.lineSwitchSelected = function(selectEl) {
+            const lineId = selectEl && selectEl.value;
+            if (!lineId) return;
+            selectEl.value = '';
+            window.lineCheckIn(lineId);
+        };
+
+        /* --- Line administration --- */
+
+        async function processAddLine(e) {
+            e.preventDefault();
+            if (!canManageLines()) return notify('You do not have permission to create lines.');
+
+            const name = UI.inputLineName.value.trim();
+            const description = UI.inputLineDesc.value.trim();
+            const capRaw = parseInt(UI.inputLineCapacity.value, 10);
+            const capacity = Number.isFinite(capRaw) && capRaw > 0 ? capRaw : null;
+            if (!name) return;
+
+            let rejected = null;
+            const ok = await mutateDocArray('lines', lines => {
+                // Re-checked against the live list so two admins can't create the same line
+                // name at once and leave agents unable to tell the two apart.
+                if (lines.some(l => (l.name || '').trim().toLowerCase() === name.toLowerCase())) {
+                    rejected = `A line called "${name}" already exists.`;
+                    return null;
+                }
+                return [...lines, {
+                    id: crypto.randomUUID(),
+                    name,
+                    description,
+                    capacity,
+                    isActive: true,
+                    order: lines.length,
+                    createdAt: new Date().toISOString(),
+                    createdBy: currentUserEmail()
+                }];
+            });
+            if (rejected) return notify(rejected);
+            if (!ok) return;
+
+            UI.inputLineName.value = '';
+            UI.inputLineDesc.value = '';
+            UI.inputLineCapacity.value = '';
+            logActivity('Call Lines', `Line <strong>${escapeHtml(name)}</strong> was created`);
+            State.commit(['activities']);
+            renderLinesView();
+            notify(`Line "${name}" created.`);
+        }
+
+        window.openEditLineModal = function(id) {
+            const line = (State.lines || []).find(l => l.id === id);
+            if (!line) return;
+            UI.editLineId.value = line.id;
+            UI.editLineName.value = line.name || '';
+            UI.editLineDesc.value = line.description || '';
+            UI.editLineCapacity.value = line.capacity || '';
+            UI.modalEditLine.classList.add('active');
+        };
+
+        async function submitEditLine(e) {
+            e.preventDefault();
+            if (!canManageLines()) return notify('You do not have permission to edit lines.');
+
+            const id = UI.editLineId.value;
+            const name = UI.editLineName.value.trim();
+            const description = UI.editLineDesc.value.trim();
+            const capRaw = parseInt(UI.editLineCapacity.value, 10);
+            const capacity = Number.isFinite(capRaw) && capRaw > 0 ? capRaw : null;
+            if (!name) return;
+
+            let rejected = null;
+            let previousName = '';
+            const ok = await mutateDocArray('lines', lines => {
+                const line = lines.find(l => l.id === id);
+                if (!line) { rejected = 'That line no longer exists.'; return null; }
+                if (lines.some(l => l.id !== id && (l.name || '').trim().toLowerCase() === name.toLowerCase())) {
+                    rejected = `A line called "${name}" already exists.`;
+                    return null;
+                }
+                previousName = line.name || '';
+                line.name = name;
+                line.description = description;
+                line.capacity = capacity;
+                return lines;
+            });
+            if (rejected) return notify(rejected);
+            if (!ok) return;
+
+            // Sessions store lineName as a snapshot so history stays readable after a rename;
+            // the OPEN ones are updated so the live board doesn't show the old label.
+            if (previousName !== name) {
+                await mutateDocArray('lineSessions', sessions => {
+                    let touched = false;
+                    const next = sessions.map(s => {
+                        if (s.lineId === id && !s.checkOutAt && s.lineName !== name) { touched = true; return { ...s, lineName: name }; }
+                        return s;
+                    });
+                    return touched ? next : null;
+                });
+            }
+
+            logActivity('Call Lines', `Line <strong>${escapeHtml(previousName)}</strong> was updated${previousName !== name ? ` and renamed to <strong>${escapeHtml(name)}</strong>` : ''}`);
+            State.commit(['activities']);
+            window.closeModals();
+            renderLinesView();
+            notify('Line updated.');
+        }
+
+        window.toggleLineActive = async function(id) {
+            if (!canManageLines()) return notify('You do not have permission to change lines.');
+            let label = '';
+            let nowActive = true;
+            const ok = await mutateDocArray('lines', lines => {
+                const line = lines.find(l => l.id === id);
+                if (!line) return null;
+                line.isActive = line.isActive === false;
+                label = line.name || '';
+                nowActive = line.isActive;
+                return lines;
+            });
+            if (!ok) return;
+
+            logActivity('Call Lines', `Line <strong>${escapeHtml(label)}</strong> was ${nowActive ? 'reopened' : 'closed for check-in'}`);
+            State.commit(['activities']);
+            renderLinesView();
+            notify(`${label} ${nowActive ? 'reopened' : 'closed'}.`);
+        };
+
+        window.openDeleteLineModal = function(id) {
+            const line = (State.lines || []).find(l => l.id === id);
+            if (!line) return;
+            const onLine = openLineSessions().filter(s => s.lineId === id).length;
+            UI.deleteLineId.value = id;
+            UI.deleteLineMsg.innerHTML = `Delete <strong>${escapeHtml(line.name)}</strong>?`
+                + (onLine > 0 ? ` ${onLine} agent(s) are on this line right now and will be checked out automatically.` : '')
+                + ' Past sessions are kept, so reporting for this line stays intact.';
+            UI.modalDeleteLine.classList.add('active');
+        };
+
+        window.confirmDeleteLine = async function() {
+            if (!canManageLines()) return notify('You do not have permission to delete lines.');
+            const id = UI.deleteLineId.value;
+            const line = (State.lines || []).find(l => l.id === id);
+            const label = line ? line.name : 'Line';
+
+            // Close open sessions FIRST. If the line row went away while an agent was still
+            // checked in, their session would stay open forever with nothing left to close it.
+            const now = new Date();
+            await mutateDocArray('lineSessions', sessions => {
+                let touched = false;
+                const next = sessions.map(s => {
+                    if (s.lineId === id && !s.checkOutAt) { touched = true; return closeLineSession(s, now, currentUserEmail(), 'line-removed'); }
+                    return s;
+                });
+                return touched ? next : null;
+            });
+
+            const ok = await mutateDocArray('lines', lines => {
+                if (!lines.some(l => l.id === id)) return null;
+                return lines.filter(l => l.id !== id);
+            });
+            if (!ok) { window.closeModals(); return notify('That line was already removed.'); }
+
+            logActivity('Call Lines', `Line <strong>${escapeHtml(label)}</strong> was deleted (session history kept)`);
+            State.commit(['activities']);
+            window.closeModals();
+            renderLinesView();
+            notify(`${label} deleted.`);
+        };
+
+        /* --- Rendering --- */
+
+        window.switchLinesTab = function(tab) {
+            linesTab = tab;
+            const map = {
+                board: [UI.tabLinesBoard, UI.panelLinesBoard],
+                manage: [UI.tabLinesManage, UI.panelLinesManage],
+                reports: [UI.tabLinesReports, UI.panelLinesReports]
+            };
+            Object.keys(map).forEach(key => {
+                const [btn, panel] = map[key];
+                if (!btn || !panel) return;
+                const on = key === tab;
+                btn.classList.toggle('btn-primary', on);
+                btn.classList.toggle('btn-outline', !on);
+                panel.classList.toggle('hidden', !on);
+            });
+            renderLinesView();
+        };
+
+        function renderLinesView() {
+            if (!UI.linesBoardGrid) return;
+            renderLineStats();
+            renderMyLineStatus();
+            renderLineBoard();
+            renderLinesTable();
+            populateLineReportFilters();
+            renderLinesReport();
+        }
+
+        function renderLineStats() {
+            const open = openLineSessions();
+            const active = activeLines();
+            const seats = active.reduce((sum, l) => {
+                if (!l.capacity) return sum;
+                const used = open.filter(s => s.lineId === l.id).length;
+                return sum + Math.max(0, l.capacity - used);
+            }, 0);
+            const unlimited = active.some(l => !l.capacity);
+
+            UI.statLinesActive.innerText = active.length;
+            UI.statLinesOnCall.innerText = open.length;
+            UI.statLinesSeats.innerText = unlimited ? (seats > 0 ? `${seats}+` : '∞') : seats;
+
+            UI.statLinesMyTime.innerText = formatLineDuration(myTimeTodayMs());
+        }
+
+        // Time the signed-in user has spent on lines during the current shift window -- the
+        // same 9pm-6am day the Dashboard counts tickets against, so the two agree. A session
+        // still running counts up to right now, which is why this is recomputed on every tick
+        // rather than only when the view re-renders.
+        function myTimeTodayMs() {
+            const me = myLineIdentity();
+            if (!me) return 0;
+            const win = getTodayShiftWindow();
+            return (State.lineSessions || []).reduce((sum, s) => {
+                if (!s || s.agentId !== me.agentId) return sum;
+                const t = new Date(s.checkInAt).getTime();
+                if (isNaN(t) || t < win.start.getTime() || t > win.end.getTime()) return sum;
+                return sum + lineSessionDuration(s);
+            }, 0);
+        }
+
+        function renderMyLineStatus() {
+            const me = myLineIdentity();
+            if (!me) { UI.lineMyStatus.innerHTML = ''; return; }
+
+            const mine = myOpenLineSession();
+            const open = activeLines().filter(l => {
+                if (mine && l.id === mine.lineId) return false;
+                if (!l.capacity) return true;
+                return openLineSessions().filter(s => s.lineId === l.id).length < l.capacity;
+            });
+
+            const unlinkedHint = me.linked ? '' :
+                `<div class="input-hint" style="margin-top:0.4rem;">Not linked to an agent record — time is logged against <strong>${escapeHtml(me.agentName)}</strong>. An admin can link you by setting your Zendesk Agent Email to match your agent profile.</div>`;
+
+            if (mine) {
+                UI.lineMyStatus.innerHTML = `
+                    <div class="agent-profile" style="flex-wrap: wrap; gap: 0.75rem;">
+                        <div class="agent-info">
+                            <div class="label">On ${escapeHtml(mine.lineName)}</div>
+                            <div class="name" data-line-start="${escapeHtml(mine.checkInAt)}">${escapeHtml(formatLineDuration(lineSessionDuration(mine)))}</div>
+                            <div class="input-hint" style="margin-top:0.2rem;">Checked in at ${escapeHtml(formatLineClock(mine.checkInAt))}</div>
+                            ${unlinkedHint}
+                        </div>
+                    </div>
+                    <div style="display:flex; gap:0.6rem; align-items:center; flex-wrap:wrap;">
+                        ${open.length ? `<select class="input-control" style="width:auto; min-width:150px;" onchange="window.lineSwitchSelected(this)">
+                            <option value="">Move to…</option>
+                            ${open.map(l => `<option value="${escapeHtml(l.id)}">${escapeHtml(l.name)}</option>`).join('')}
+                        </select>` : ''}
+                        <button class="btn btn-danger" style="padding:0.6rem 1.25rem;" onclick="window.lineCheckOut('${escapeHtml(mine.id)}')">Check Out</button>
+                    </div>`;
+            } else {
+                UI.lineMyStatus.innerHTML = `
+                    <div class="agent-profile" style="flex-wrap: wrap; gap: 0.75rem;">
+                        <div class="agent-info">
+                            <div class="label offline">Not on a line</div>
+                            <div class="name">${escapeHtml(me.agentName)}</div>
+                            ${unlinkedHint}
+                        </div>
+                    </div>
+                    <div style="display:flex; gap:0.6rem; align-items:center; flex-wrap:wrap;">
+                        ${open.length ? `<select class="input-control" style="width:auto; min-width:160px;" onchange="window.lineSwitchSelected(this)">
+                            <option value="">Check in to…</option>
+                            ${open.map(l => `<option value="${escapeHtml(l.id)}">${escapeHtml(l.name)}</option>`).join('')}
+                        </select>` : `<span style="color: var(--text-muted); font-size:0.9rem;">${activeLines().length ? 'Every line is full right now.' : 'No lines have been set up yet.'}</span>`}
+                    </div>`;
+            }
+        }
+
+        function renderLineBoard() {
+            const lines = sortedLines();
+            const open = openLineSessions();
+            const me = myLineIdentity();
+            const supervisor = canManageLines();
+            const nowMs = Date.now();
+
+            UI.linesBoardMeta.innerText = lines.length
+                ? `${open.length} agent(s) on ${lines.filter(l => open.some(s => s.lineId === l.id)).length} of ${lines.length} line(s)`
+                : '';
+
+            if (lines.length === 0) {
+                UI.linesBoardGrid.innerHTML = `<p style="color: var(--text-muted); font-size: 0.95rem;">No lines yet. ${supervisor ? 'Use <strong>Manage Lines</strong> to create Line 1.' : 'An administrator needs to create them first.'}</p>`;
+                return;
+            }
+
+            // Agents free to be placed on a line by a supervisor: on the roster, available,
+            // and not already sitting on another line.
+            const busy = new Set(open.map(s => s.agentId));
+            const freeAgents = State.agents.filter(a => a.isAvailable !== false && !busy.has(a.id));
+
+            UI.linesBoardGrid.innerHTML = `<div class="line-grid">` + lines.map(line => {
+                const occupants = open.filter(s => s.lineId === line.id)
+                    .sort((a, b) => new Date(a.checkInAt).getTime() - new Date(b.checkInAt).getTime());
+                const full = line.capacity && occupants.length >= line.capacity;
+                const closed = line.isActive === false;
+                const mineHere = me && occupants.some(s => s.agentId === me.agentId);
+
+                const occupantHtml = occupants.length ? occupants.map(s => {
+                    const stale = (nowMs - new Date(s.checkInAt).getTime()) > LINE_STALE_MS;
+                    const canClose = supervisor || (me && s.agentId === me.agentId);
+                    return `<li class="line-occupant">
+                        <span class="line-dot${stale ? ' stale' : ''}"></span>
+                        <span class="line-occupant-name">${escapeHtml(s.agentName)}</span>
+                        <span class="line-occupant-time" data-line-start="${escapeHtml(s.checkInAt)}">${escapeHtml(formatLineDuration(lineSessionDuration(s, nowMs)))}</span>
+                        ${stale ? `<span class="badge" style="color:#f59e0b; background:rgba(245,158,11,0.15);" title="Checked in ${escapeHtml(formatLineClock(s.checkInAt))} — probably a missed check-out">Stale</span>` : ''}
+                        ${canClose ? `<button class="btn-icon danger" title="Check out ${escapeHtml(s.agentName)}" onclick="window.lineCheckOut('${escapeHtml(s.id)}')"><svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg></button>` : ''}
+                    </li>`;
+                }).join('') : `<li class="line-empty">Nobody on this line</li>`;
+
+                return `<div class="line-card${closed ? ' closed' : ''}">
+                    <div class="line-card-head">
+                        <div>
+                            <div class="line-card-name">${escapeHtml(line.name)}</div>
+                            ${line.description ? `<div class="line-card-desc">${escapeHtml(line.description)}</div>` : ''}
+                        </div>
+                        <span class="badge">${occupants.length}${line.capacity ? ` / ${line.capacity}` : ''}</span>
+                    </div>
+                    <ul class="line-occupants">${occupantHtml}</ul>
+                    <div class="line-card-foot">
+                        ${closed
+                            ? `<span style="color: var(--text-muted); font-size: 0.8rem;">Closed for check-in</span>`
+                            : mineHere
+                                ? `<span style="color:#10b981; font-size: 0.8rem; font-weight:600;">You are on this line</span>`
+                                : full
+                                    ? `<span style="color: var(--text-muted); font-size: 0.8rem;">Full</span>`
+                                    : `<button class="btn btn-outline" style="padding:0.45rem 0.9rem; font-size:0.8rem;" onclick="window.lineCheckIn('${escapeHtml(line.id)}')">Check In</button>`}
+                        ${supervisor && !closed && !full && freeAgents.length ? `<select class="input-control" style="padding:0.45rem 0.6rem; font-size:0.8rem; width:auto; min-width:150px;" onchange="window.lineCheckInSelected('${escapeHtml(line.id)}', this)">
+                            <option value="">Check in agent…</option>
+                            ${freeAgents.map(a => `<option value="${escapeHtml(a.id)}">${escapeHtml(a.name)}</option>`).join('')}
+                        </select>` : ''}
+                    </div>
+                </div>`;
+            }).join('') + `</div>`;
+        }
+
+        function renderLinesTable() {
+            if (!UI.tableLines) return;
+            const lines = sortedLines();
+            const open = openLineSessions();
+
+            if (lines.length === 0) {
+                UI.tableLines.innerHTML = `<tr><td colspan="4" style="text-align:center; color: var(--text-muted); padding: 2rem;">No lines created yet.</td></tr>`;
+                return;
+            }
+
+            UI.tableLines.innerHTML = lines.map(line => {
+                const used = open.filter(s => s.lineId === line.id).length;
+                const closed = line.isActive === false;
+                return `<tr>
+                    <td>
+                        <strong>${escapeHtml(line.name)}</strong>
+                        ${line.description ? `<div style="font-size:0.78rem; color: var(--text-muted);">${escapeHtml(line.description)}</div>` : ''}
+                    </td>
+                    <td>${used}${line.capacity ? ` / ${line.capacity}` : ' <span style="color: var(--text-muted); font-size:0.78rem;">(unlimited)</span>'}</td>
+                    <td><span class="badge" style="${closed ? 'color:#f43f5e; background:rgba(244,63,94,0.15);' : 'color:#10b981; background:rgba(16,185,129,0.15);'}">${closed ? 'Closed' : 'Open'}</span></td>
+                    <td style="text-align: right; white-space: nowrap;">
+                        <button class="btn-icon" title="Edit line" onclick="window.openEditLineModal('${escapeHtml(line.id)}')"><svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg></button>
+                        <button class="btn-icon" title="${closed ? 'Reopen line' : 'Close line for check-in'}" onclick="window.toggleLineActive('${escapeHtml(line.id)}')"><svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">${closed ? '<path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path><line x1="12" y1="2" x2="12" y2="12"></line>' : '<rect x="6" y="6" width="12" height="12" rx="2"></rect>'}</svg></button>
+                        <button class="btn-icon danger" title="Delete line" onclick="window.openDeleteLineModal('${escapeHtml(line.id)}')"><svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg></button>
+                    </td>
+                </tr>`;
+            }).join('');
+        }
+
+        /* --- Reporting --- */
+
+        function populateLineReportFilters() {
+            if (!UI.linesReportLine) return;
+
+            const keepLine = UI.linesReportLine.value;
+            const lineNames = [...new Set((State.lineSessions || []).map(s => s.lineName).filter(Boolean)
+                .concat(sortedLines().map(l => l.name)))].sort();
+            UI.linesReportLine.innerHTML = '<option value="">All Lines</option>'
+                + lineNames.map(n => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('');
+            UI.linesReportLine.value = lineNames.includes(keepLine) ? keepLine : '';
+
+            const keepAgent = UI.linesReportAgent.value;
+            const agentNames = [...new Set((State.lineSessions || []).map(s => s.agentName).filter(Boolean))].sort();
+            UI.linesReportAgent.innerHTML = '<option value="">All Agents</option>'
+                + agentNames.map(n => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('');
+            UI.linesReportAgent.value = agentNames.includes(keepAgent) ? keepAgent : '';
+        }
+
+        // Sessions are attributed to the day they STARTED on, which is how the History Log
+        // treats tickets too. A call that runs past midnight therefore counts entirely
+        // against the shift it began in rather than being split across two days.
+        function getFilteredLineSessions() {
+            const startStr = UI.linesReportStart.value;
+            const endStr = UI.linesReportEnd.value;
+            const lineName = UI.linesReportLine.value;
+            const agentName = UI.linesReportAgent.value;
+
+            const startMs = startStr ? new Date(`${startStr}T00:00:00`).getTime() : null;
+            const endMs = endStr ? new Date(`${endStr}T23:59:59.999`).getTime() : null;
+
+            return (State.lineSessions || []).filter(s => {
+                if (!s || !s.checkInAt) return false;
+                if (lineName && s.lineName !== lineName) return false;
+                if (agentName && s.agentName !== agentName) return false;
+                const t = new Date(s.checkInAt).getTime();
+                if (isNaN(t)) return false;
+                if (startMs !== null && t < startMs) return false;
+                if (endMs !== null && t > endMs) return false;
+                return true;
+            }).sort((a, b) => new Date(b.checkInAt).getTime() - new Date(a.checkInAt).getTime());
+        }
+
+        function renderLinesReport() {
+            if (!UI.tableLinesByAgent) return;
+            const sessions = getFilteredLineSessions();
+            const nowMs = Date.now();
+            const stillOpen = sessions.filter(s => !s.checkOutAt).length;
+
+            const byAgent = new Map();
+            const byLine = new Map();
+            sessions.forEach(s => {
+                const ms = lineSessionDuration(s, nowMs);
+                if (!byAgent.has(s.agentName)) byAgent.set(s.agentName, { total: 0, count: 0, lines: new Set() });
+                const a = byAgent.get(s.agentName);
+                a.total += ms; a.count += 1; a.lines.add(s.lineName);
+
+                if (!byLine.has(s.lineName)) byLine.set(s.lineName, { total: 0, count: 0, agents: new Set() });
+                const l = byLine.get(s.lineName);
+                l.total += ms; l.count += 1; l.agents.add(s.agentName);
+            });
+
+            const grand = sessions.reduce((sum, s) => sum + lineSessionDuration(s, nowMs), 0);
+            UI.linesReportSummary.innerText = sessions.length
+                ? `${sessions.length} session(s) · ${formatLineDuration(grand)} total${stillOpen ? ` · ${stillOpen} still in progress` : ''}`
+                : 'No sessions in this range';
+
+            const agentRows = [...byAgent.entries()].sort((a, b) => b[1].total - a[1].total);
+            UI.tableLinesByAgent.innerHTML = agentRows.length ? agentRows.map(([name, d]) => `<tr>
+                <td><strong>${escapeHtml(name)}</strong></td>
+                <td>${d.count}</td>
+                <td>${escapeHtml(formatLineDuration(d.total))}</td>
+                <td>${escapeHtml(formatLineHours(d.total))}</td>
+                <td>${escapeHtml(formatLineDuration(d.total / d.count))}</td>
+                <td style="font-size:0.8rem; color: var(--text-muted);">${escapeHtml([...d.lines].join(', '))}</td>
+            </tr>`).join('') : `<tr><td colspan="6" style="text-align:center; color: var(--text-muted); padding: 2rem;">No sessions in this range.</td></tr>`;
+
+            const lineRows = [...byLine.entries()].sort((a, b) => b[1].total - a[1].total);
+            UI.tableLinesByLine.innerHTML = lineRows.length ? lineRows.map(([name, d]) => `<tr>
+                <td><strong>${escapeHtml(name)}</strong></td>
+                <td>${d.count}</td>
+                <td>${escapeHtml(formatLineDuration(d.total))}</td>
+                <td>${escapeHtml(formatLineHours(d.total))}</td>
+                <td>${d.agents.size}</td>
+            </tr>`).join('') : `<tr><td colspan="5" style="text-align:center; color: var(--text-muted); padding: 2rem;">No sessions in this range.</td></tr>`;
+
+            UI.linesDetailCount.innerText = sessions.length ? `${sessions.length} session(s)` : '';
+            UI.tableLinesSessions.innerHTML = sessions.length ? sessions.slice(0, 500).map(s => {
+                const live = !s.checkOutAt;
+                return `<tr>
+                    <td>${escapeHtml(s.agentName)}</td>
+                    <td>${escapeHtml(s.lineName)}</td>
+                    <td style="white-space: nowrap;">${escapeHtml(formatLineClock(s.checkInAt))}</td>
+                    <td style="white-space: nowrap;">${live ? '<span style="color:#10b981; font-weight:600;">In progress</span>' : escapeHtml(formatLineClock(s.checkOutAt))}</td>
+                    <td${live ? ` data-line-start="${escapeHtml(s.checkInAt)}"` : ''}>${escapeHtml(formatLineDuration(lineSessionDuration(s, nowMs)))}</td>
+                    <td style="font-size:0.8rem; color: var(--text-muted);">${escapeHtml(describeLineSessionEnd(s))}</td>
+                </tr>`;
+            }).join('') : `<tr><td colspan="6" style="text-align:center; color: var(--text-muted); padding: 2rem;">No sessions in this range.</td></tr>`;
+        }
+
+        function describeLineSessionEnd(s) {
+            if (!s.checkOutAt) return '—';
+            const who = s.checkOutBy ? formatUserLabel(s.checkOutBy) : '';
+            const reason = {
+                switch: 'Moved to another line',
+                supervisor: 'Supervisor check-out',
+                'line-removed': 'Line deleted',
+                manual: 'Self check-out'
+            }[s.endedReason] || 'Check-out';
+            return who ? `${reason} (${who})` : reason;
+        }
+
+        // Live timers, ticked in place rather than by re-rendering: a full re-render every
+        // second would close any open dropdown on the board and fight with the user.
+        function tickLineDurations() {
+            const view = document.getElementById('view-lines');
+            if (!view || !view.classList.contains('active')) return;
+            const nowMs = Date.now();
+            document.querySelectorAll('#view-lines [data-line-start]').forEach(el => {
+                const start = new Date(el.getAttribute('data-line-start')).getTime();
+                if (isNaN(start)) return;
+                el.textContent = formatLineDuration(Math.max(0, nowMs - start));
+            });
+            if (UI.statLinesMyTime) UI.statLinesMyTime.innerText = formatLineDuration(myTimeTodayMs());
+        }
+
+        /* --- Exports --- */
+
+        const LINE_EXPORT_HEADERS = ['Agent', 'Line', 'Checked In', 'Checked Out', 'Duration', 'Hours', 'Ended By'];
+
+        function getLineExportRows() {
+            const nowMs = Date.now();
+            return getFilteredLineSessions().map(s => [
+                s.agentName || '',
+                s.lineName || '',
+                formatLineClock(s.checkInAt),
+                s.checkOutAt ? formatLineClock(s.checkOutAt) : 'In progress',
+                formatLineDuration(lineSessionDuration(s, nowMs)),
+                formatLineHours(lineSessionDuration(s, nowMs)),
+                describeLineSessionEnd(s)
+            ]);
+        }
+
+        function lineExportReady() {
+            if (getFilteredLineSessions().length === 0) {
+                notify('Nothing to export — no sessions in this range.');
+                return false;
+            }
+            return true;
+        }
+
+        function lineExportSubtitle() {
+            const from = UI.linesReportStart.value || 'the beginning';
+            const to = UI.linesReportEnd.value || 'today';
+            const line = UI.linesReportLine.value || 'All lines';
+            const agent = UI.linesReportAgent.value || 'All agents';
+            return `${from} to ${to} — ${line} — ${agent}`;
+        }
+
+        function exportLinesCsv() {
+            if (!lineExportReady()) return;
+            const escapeCell = v => `"${String(v).replace(/"/g, '""')}"`;
+            const lines = [LINE_EXPORT_HEADERS.map(escapeCell).join(',')];
+            getLineExportRows().forEach(row => lines.push(row.map(escapeCell).join(',')));
+            const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
+            triggerDownload(blob, `Call_Lines_${getLocalDateString()}.csv`);
+            notify('CSV exported.');
+        }
+
+        function exportLinesPdf() {
+            if (!lineExportReady()) return;
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF({ orientation: 'landscape' });
+            doc.setFontSize(16);
+            doc.text('Call Line Sessions', 14, 15);
+            doc.setFontSize(9);
+            doc.setTextColor(100);
+            doc.text(lineExportSubtitle(), 14, 22);
+            doc.autoTable({
+                startY: 28,
+                head: [LINE_EXPORT_HEADERS],
+                body: getLineExportRows(),
+                theme: 'grid',
+                styles: { fontSize: 8, cellPadding: 2, overflow: 'linebreak' },
+                headStyles: { fillColor: [79, 70, 229] }
+            });
+            doc.save(`Call_Lines_${getLocalDateString()}.pdf`);
+            notify('PDF exported.');
+        }
+
+        function exportLinesDoc() {
+            if (!lineExportReady()) return;
+            const headerHtml = LINE_EXPORT_HEADERS.map(h => `<th style="background:#4f46e5; color:#fff; text-align:left; padding:6px; border:1px solid #999;">${escapeHtml(h)}</th>`).join('');
+            const bodyHtml = getLineExportRows().map(row =>
+                `<tr>${row.map(cell => `<td style="padding:6px; border:1px solid #999; font-size:10pt;">${escapeHtml(String(cell))}</td>`).join('')}</tr>`
+            ).join('');
+            const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+<head><meta charset="utf-8"><title>Call Line Sessions</title></head>
+<body style="font-family: Calibri, Arial, sans-serif;">
+<h2>Call Line Sessions</h2>
+<p style="font-size:10pt; color:#555;">${escapeHtml(lineExportSubtitle())}</p>
+<table style="border-collapse:collapse; width:100%;"><thead><tr>${headerHtml}</tr></thead><tbody>${bodyHtml}</tbody></table>
+</body></html>`;
+            const blob = new Blob(['﻿' + html], { type: 'application/msword' });
+            triggerDownload(blob, `Call_Lines_${getLocalDateString()}.doc`);
+            notify('Word document exported.');
         }
 
         function notify(message) {

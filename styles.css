@@ -229,6 +229,24 @@ hr.divider { border: 0; border-top: 1px solid var(--border-light); margin: 1.5re
 .section-divider { display: flex; align-items: center; gap: 0.75rem; margin: 2.5rem 0 1.25rem; color: var(--text-muted); font-size: 0.8rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
 .section-divider::after { content: ''; flex: 1; height: 1px; background: var(--border-light); }
 
+/* --- CALL LINES --- */
+.line-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(255px, 1fr)); gap: 1rem; }
+.line-card { background: var(--bg-input); border: 1px solid var(--border-light); border-radius: var(--radius-md); padding: 1rem 1.1rem; display: flex; flex-direction: column; gap: 0.75rem; transition: var(--trans); }
+.line-card.closed { opacity: 0.6; }
+.line-card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 0.75rem; }
+.line-card-name { font-weight: 700; font-size: 1.05rem; }
+.line-card-desc { font-size: 0.78rem; color: var(--text-muted); margin-top: 0.15rem; }
+.line-occupants { list-style: none; display: flex; flex-direction: column; gap: 0.5rem; margin: 0; padding: 0; }
+.line-occupant { display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; flex-wrap: wrap; }
+.line-occupant-name { font-weight: 600; }
+/* Tabular figures stop the running timer from jittering as the digits change. */
+.line-occupant-time { color: var(--text-muted); font-variant-numeric: tabular-nums; margin-left: auto; }
+.line-empty { color: var(--text-muted); font-size: 0.82rem; font-style: italic; }
+.line-dot { width: 8px; height: 8px; border-radius: 50%; background: #10b981; box-shadow: 0 0 8px #10b981; flex-shrink: 0; }
+.line-dot.stale { background: #f59e0b; box-shadow: 0 0 8px #f59e0b; }
+.line-card-foot { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; margin-top: auto; padding-top: 0.6rem; border-top: 1px solid var(--border-light); }
+#line-my-status .name { font-variant-numeric: tabular-nums; }
+
 /* --- RESPONSIVE / MOBILE ---
    The app was built desktop-only: a fixed 260px sidebar, body{overflow:hidden}, two-column
    grids and wide tables with no horizontal escape. On a 375px phone the sidebar alone ate
@@ -315,6 +333,7 @@ hr.divider { border: 0; border-top: 1px solid var(--border-light); margin: 1.5re
 @media (max-width: 480px) {
     .content-area { padding: 1rem 0.75rem 3rem; }
     .stat-card { flex: 1 1 100%; }
+    .line-grid { grid-template-columns: 1fr; }
     .page-title h1 { font-size: 1.3rem; }
     .page-title p { font-size: 0.85rem; }
     .table-scroll table { min-width: 600px; }
