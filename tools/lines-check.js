@@ -56,7 +56,7 @@ async function runTransaction(db, fn) {
 }
 
 const notices = [];
-const State = { lines: [], lineSessions: [], agents: [], currentUser: null, activities: [], commit: async () => {} };
+const State = { lines: [], lineSessions: [], lineSettings: {}, agents: [], currentUser: null, activities: [], commit: async () => {} };
 const UI = {};
 const globals = {
     runTransaction, db: {}, docRef, State, UI,
@@ -79,6 +79,8 @@ const factory = new Function(...Object.keys(globals), `
              lineSessionDuration, formatLineDuration, formatLineHours, closeLineSession,
              openLineSessions, canManageLines, myLineIdentity, LINE_SESSION_CAP,
              setAgentPresence, isAgentAway, agentPresence, PRESENCE_AWAY,
+             dashboardLineCount, dashboardLines, canViewLineReports, mutateDocObject,
+             moveLine: window.moveLine,
              lineCheckIn: window.lineCheckIn, lineCheckOut: window.lineCheckOut };
 `);
 const L = factory(...Object.values(globals));
@@ -261,6 +263,67 @@ const C = { agentId: 'a3', agentName: 'Cara', userEmail: 'cara@x.com', linked: t
     const remembered = doc.agents.find(a => a.id === 'a1').awayFromLineId;
     await L.setAgentPresence('a1', L.PRESENCE_AWAY);
     check('still remembers the line', doc.agents.find(a => a.id === 'a1').awayFromLineId === remembered && remembered === 'L1');
+
+    console.log('\n16. The Dashboard shows the first N lines IN ORDER');
+    // Regression: an earlier build picked lines by matching the names "Line 1/2/3", so a line
+    // called "Line 2 / Opsmon" dropped out of the set and the cards rendered out of order.
+    const MANY = [
+        { id: 'L1', name: 'Line 1', order: 0, isActive: true },
+        { id: 'L2', name: 'Line 2 / Opsmon', order: 1, isActive: true },
+        { id: 'L3', name: 'Line 3', order: 2, isActive: true },
+        { id: 'L4', name: 'Line 4', order: 3, isActive: true },
+        { id: 'L5', name: 'Line 5', order: 4, isActive: true }
+    ];
+    reset(MANY, []);
+    State.lineSettings = {};
+    check('defaults to 3', L.dashboardLineCount() === 3, String(L.dashboardLineCount()));
+    check('takes the first three in order, odd names included',
+        L.dashboardLines().map(l => l.name).join(' | ') === 'Line 1 | Line 2 / Opsmon | Line 3',
+        L.dashboardLines().map(l => l.name).join(' | '));
+    State.lineSettings = { dashboardCount: 5 };
+    check('honours the admin setting', L.dashboardLines().length === 5);
+    State.lineSettings = { dashboardCount: 99 };
+    check('a count past the end just shows them all', L.dashboardLines().length === 5);
+    State.lineSettings = { dashboardCount: 0 };
+    check('zero falls back to the default', L.dashboardLineCount() === 3);
+    State.lineSettings = { dashboardCount: 'nonsense' };
+    check('garbage falls back to the default', L.dashboardLineCount() === 3);
+    State.lineSettings = {};
+
+    console.log('\n17. Reordering lines changes what the Dashboard shows');
+    State.currentUser = { role: 'admin', permissions: {} };
+    await L.moveLine('L3', 'up');
+    check('Line 3 moved above Line 2 / Opsmon',
+        L.dashboardLines().map(l => l.name).join(' | ') === 'Line 1 | Line 3 | Line 2 / Opsmon',
+        L.dashboardLines().map(l => l.name).join(' | '));
+    check('order renumbered cleanly', doc.lines.map(l => l.order).sort((a, b) => a - b).join(',') === '0,1,2,3,4');
+    await L.moveLine('L1', 'up');
+    check('moving the first line up does nothing', L.dashboardLines()[0].name === 'Line 1');
+    const last = doc.lines.slice().sort((a, b) => a.order - b.order).pop();
+    await L.moveLine(last.id, 'down');
+    check('moving the last line down does nothing', doc.lines.slice().sort((a, b) => a.order - b.order).pop().id === last.id);
+    // Older records can have a missing or duplicated `order`; the swap must still work.
+    doc.lines.forEach(l => { delete l.order; });
+    State.lines = doc.lines;
+    const beforeNames = L.dashboardLines().map(l => l.name);
+    await L.moveLine(beforeNames[2] === 'Line 3' ? 'L3' : doc.lines[2].id, 'up');
+    check('survives records with no order field', doc.lines.every(l => Number.isFinite(l.order)));
+
+    console.log('\n18. Call line reports are permission-gated');
+    State.currentUser = { role: 'admin', permissions: {} };
+    check('admin can view', L.canViewLineReports() === true);
+    State.currentUser = { role: 'user', permissions: { viewLineReports: true } };
+    check('the report permission grants it', L.canViewLineReports() === true);
+    State.currentUser = { role: 'user', permissions: { manageLines: true } };
+    check('managing lines implies viewing reports', L.canViewLineReports() === true);
+    State.currentUser = { role: 'user', permissions: { manageAgents: true, viewCsat: true } };
+    check('unrelated permissions do NOT grant it', L.canViewLineReports() === false);
+    State.currentUser = { role: 'user', permissions: {} };
+    check('a plain user cannot view', L.canViewLineReports() === false);
+    State.currentUser = { role: 'user' };
+    check('a missing permissions object is safe', L.canViewLineReports() === false);
+    State.currentUser = null;
+    check('signed out cannot view', L.canViewLineReports() === false);
 
     console.log(`\n${pass} passed, ${fail} failed\n`);
     process.exit(fail === 0 ? 0 : 1);

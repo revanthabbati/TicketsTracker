@@ -71,7 +71,7 @@ clicking through the app because they need two people acting at once.
 node tools/lines-check.js
 ```
 
-Runs 65 assertions covering:
+Runs 83 assertions covering:
 
 - **seat capacity under a race** — two agents taking the last seat at the same instant, with a
   second client deliberately committing mid-transaction. A line must never exceed its capacity.
@@ -87,6 +87,13 @@ Runs 65 assertions covering:
   remembers the line, restores both on return, and leaves every other agent's record untouched.
   This one matters because it writes the `agents` array, which the round-robin and the shift
   evaluator both depend on.
+- **which lines reach the Dashboard** — the first N in the admin's order, N being a setting.
+  Guards the regression where lines were picked by matching the names "Line 1/2/3", so a line
+  called `Line 2 / Opsmon` fell out of the set and the cards rendered out of order.
+- **reordering** — including lines whose `order` field is missing or duplicated, which older
+  records can be.
+- **report access** — that a plain user cannot view call-line reports, that the permission
+  grants it, and that managing lines implies it.
 - that writes touch **only** the fields they should and leave `users` and `tickets`
   byte-identical.
 

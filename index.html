@@ -682,7 +682,7 @@
                     <div style="display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap;">
                         <button type="button" class="btn btn-primary" id="tab-lines-board" style="padding: 0.6rem 1.25rem;" onclick="window.switchLinesTab('board')">Live Board</button>
                         <button type="button" class="btn btn-outline perm-manage-lines" id="tab-lines-manage" style="padding: 0.6rem 1.25rem;" onclick="window.switchLinesTab('manage')">Manage Lines</button>
-                        <button type="button" class="btn btn-outline" id="tab-lines-reports" style="padding: 0.6rem 1.25rem;" onclick="window.switchLinesTab('reports')">Reports</button>
+                        <button type="button" class="btn btn-outline perm-line-reports" id="tab-lines-reports" style="padding: 0.6rem 1.25rem;" onclick="window.switchLinesTab('reports')">Reports</button>
                     </div>
 
                     <div id="lines-board-panel">
@@ -723,12 +723,32 @@
                             </div>
 
                             <div class="panel">
-                                <div class="panel-header"><h2>All Lines</h2></div>
+                                <div class="panel-header">
+                                    <h2>All Lines</h2>
+                                    <label style="display:flex; align-items:center; gap:0.5rem; margin-left:auto; font-size:0.78rem; color:var(--text-muted);">
+                                        Show on Dashboard
+                                        <select id="dash-line-count" class="input-control" style="width:auto; padding:0.35rem 0.6rem; font-size:0.8rem;" onchange="window.changeDashboardLineCount(this)">
+                                            <option value="1">1 line</option>
+                                            <option value="2">2 lines</option>
+                                            <option value="3">3 lines</option>
+                                            <option value="4">4 lines</option>
+                                            <option value="5">5 lines</option>
+                                            <option value="6">6 lines</option>
+                                            <option value="8">8 lines</option>
+                                            <option value="10">10 lines</option>
+                                            <option value="all">All lines</option>
+                                        </select>
+                                    </label>
+                                </div>
+                                <div class="panel-body" style="padding: 0.75rem 1.5rem 0; color: var(--text-muted); font-size: 0.78rem;">
+                                    The Dashboard shows the first lines in this list, in this order. Use the arrows to move a line up or down.
+                                </div>
                                 <div class="table-scroll" style="max-height: 520px; overflow-y: auto;">
                                     <table>
                                         <thead>
                                             <tr>
                                                 <th>Line</th>
+                                                <th>Order</th>
                                                 <th>Occupancy</th>
                                                 <th>Status</th>
                                                 <th style="text-align: right;">Actions</th>
@@ -772,6 +792,31 @@
                         </div>
 
                         <div class="dashboard-grid" style="grid-template-columns: 1fr; gap: 1.5rem;">
+                            <div class="panel">
+                                <div class="panel-header">
+                                    <h2>Time On Line, By Agent</h2>
+                                    <span style="font-size: 0.78rem; color: var(--text-muted); margin-left:auto;">Each bar is one agent's total; the segments are the individual lines.</span>
+                                </div>
+                                <div class="panel-body">
+                                    <div class="line-chart-box" id="lines-agent-chart-box">
+                                        <canvas id="lines-agent-chart"></canvas>
+                                    </div>
+                                    <div id="lines-agent-chart-empty" class="hidden" style="color: var(--text-muted); font-size: 0.9rem;">No sessions in this range.</div>
+                                </div>
+                            </div>
+
+                            <div class="panel">
+                                <div class="panel-header">
+                                    <h2>Total Time, By Line</h2>
+                                </div>
+                                <div class="panel-body">
+                                    <div class="line-chart-box short" id="lines-line-chart-box">
+                                        <canvas id="lines-line-chart"></canvas>
+                                    </div>
+                                    <div id="lines-line-chart-empty" class="hidden" style="color: var(--text-muted); font-size: 0.9rem;">No sessions in this range.</div>
+                                </div>
+                            </div>
+
                             <div class="panel">
                                 <div class="panel-header">
                                     <h2>Time By Agent</h2>
@@ -994,6 +1039,7 @@
                                             <label class="perm-check"><input type="checkbox" id="user-perm-csat"> Can View CSAT</label>
                                             <label class="perm-check"><input type="checkbox" id="user-perm-ai-search"> Can Use AI Search</label>
                                             <label class="perm-check"><input type="checkbox" id="user-perm-lines"> Can Manage Call Lines</label>
+                                            <label class="perm-check"><input type="checkbox" id="user-perm-line-reports"> Can View Call Line Reports</label>
                                         </div>
                                     </div>
                                     <button type="submit" class="btn btn-primary" style="width: 100%;">Create Account</button>
@@ -1251,6 +1297,7 @@
                         <label class="perm-check"><input type="checkbox" id="edit-perm-csat"> Can View CSAT</label>
                         <label class="perm-check"><input type="checkbox" id="edit-perm-ai-search"> Can Use AI Search</label>
                         <label class="perm-check"><input type="checkbox" id="edit-perm-lines"> Can Manage Call Lines</label>
+                        <label class="perm-check"><input type="checkbox" id="edit-perm-line-reports"> Can View Call Line Reports</label>
                     </div>
                 </div>
                 <div style="display: flex; gap: 1rem; margin-top: 2rem;">
@@ -1509,6 +1556,7 @@
             // their updateDoc payloads, so they cannot erase them either.
             lines: [],
             lineSessions: [],
+            lineSettings: {},
 
             // Writes ONLY the top-level fields named in `fields` (e.g. commit(['agents'])),
             // instead of blindly overwriting the whole document every time. This matters
@@ -1651,6 +1699,7 @@
                 State.deletedUserIds = data.deletedUserIds || [];
                 State.lines = data.lines || [];
                 State.lineSessions = data.lineSessions || [];
+                State.lineSettings = data.lineSettings || {};
 
                 // Checked cheaply against the snapshot we already have, so the transaction is
                 // only opened when there is genuinely something to archive or restore --
@@ -1838,6 +1887,12 @@
             linesReportLine: document.getElementById('lines-report-line'),
             linesReportAgent: document.getElementById('lines-report-agent'),
             linesReportSummary: document.getElementById('lines-report-summary'),
+            linesAgentChart: document.getElementById('lines-agent-chart'),
+            linesAgentChartEmpty: document.getElementById('lines-agent-chart-empty'),
+            linesAgentChartBox: document.getElementById('lines-agent-chart-box'),
+            linesLineChart: document.getElementById('lines-line-chart'),
+            linesLineChartEmpty: document.getElementById('lines-line-chart-empty'),
+            linesLineChartBox: document.getElementById('lines-line-chart-box'),
             tableLinesByAgent: document.getElementById('table-lines-by-agent'),
             tableLinesByLine: document.getElementById('table-lines-by-line'),
             tableLinesSessions: document.getElementById('table-lines-sessions'),
@@ -1865,6 +1920,10 @@
             deleteLineId: document.getElementById('delete-line-id'),
             deleteLineMsg: document.getElementById('delete-line-msg'),
             inputPermLines: document.getElementById('user-perm-lines'),
+            inputPermLineReports: document.getElementById('user-perm-line-reports'),
+            editPermLineReports: document.getElementById('edit-perm-line-reports'),
+            lineReportsElements: document.querySelectorAll('.perm-line-reports'),
+            dashLineCount: document.getElementById('dash-line-count'),
             editPermLines: document.getElementById('edit-perm-lines'),
 
             // Zendesk Queue
@@ -2275,6 +2334,10 @@
             const canViewCsat = isAdmin || (user.permissions && user.permissions.viewCsat);
             const canAiSearch = isAdmin || (user.permissions && user.permissions.aiSearch);
             const canManageCallLines = isAdmin || (user.permissions && user.permissions.manageLines);
+            // Managing lines implies seeing the reports: the bulk-delete control lives in the
+            // Reports tab, so granting one without the other would hide a tool they have
+            // permission to use.
+            const canSeeLineReports = canManageCallLines || (user.permissions && user.permissions.viewLineReports);
 
             UI.adminElements.forEach(el => el.classList.toggle('hidden', !isAdmin));
             UI.manageAgentsElements.forEach(el => el.classList.toggle('hidden', !canManageAgents));
@@ -2283,12 +2346,19 @@
             UI.viewCsatElements.forEach(el => el.classList.toggle('hidden', !canViewCsat));
             UI.aiSearchElements.forEach(el => el.classList.toggle('hidden', !canAiSearch));
             UI.manageLinesElements.forEach(el => el.classList.toggle('hidden', !canManageCallLines));
+            UI.lineReportsElements.forEach(el => el.classList.toggle('hidden', !canSeeLineReports));
 
             if (!canManageAgents) {
                 UI.rosterGrid.style.gridTemplateColumns = "1fr";
             } else {
                 UI.rosterGrid.style.gridTemplateColumns = "1fr 1.1fr";
             }
+
+            // Panel visibility is DOM state that survives a logout, and `linesTab` is a
+            // module variable that does too. Without this, signing in as someone without
+            // report access right after an admin was on the Reports tab leaves that panel on
+            // screen -- the button is hidden but the content is not. Board is always allowed.
+            window.switchLinesTab('board');
 
             document.querySelector('.nav-item[data-target="view-assign"]').click();
             syncUI();
@@ -2455,6 +2525,7 @@
                 UI.editPermCsat.checked = user.permissions?.viewCsat || false;
                 UI.editPermAiSearch.checked = user.permissions?.aiSearch || false;
                 UI.editPermLines.checked = user.permissions?.manageLines || false;
+                UI.editPermLineReports.checked = user.permissions?.viewLineReports || false;
                 UI.modalEditUser.classList.add('active');
             }
         };
@@ -2490,6 +2561,7 @@
                 manageTickets: UI.editPermTickets.checked,
                 viewCsat: UI.editPermCsat.checked,
                 manageLines: UI.editPermLines.checked,
+                viewLineReports: UI.editPermLineReports.checked,
                 aiSearch: UI.editPermAiSearch.checked
             };
 
@@ -2865,6 +2937,7 @@
                 manageTickets: UI.inputPermTickets.checked,
                 viewCsat: UI.inputPermCsat.checked,
                 manageLines: UI.inputPermLines.checked,
+                viewLineReports: UI.inputPermLineReports.checked,
                 aiSearch: UI.inputPermAiSearch.checked
             };
 
@@ -2899,6 +2972,7 @@
             UI.inputPermCsat.checked = false;
             UI.inputPermAiSearch.checked = false;
             UI.inputPermLines.checked = false;
+            UI.inputPermLineReports.checked = false;
             renderUsersTable();
             notify("New user account created.");
         }
@@ -3869,6 +3943,7 @@
                     if (u.permissions.viewCsat) permBadges += `<span class="badge badge-perm" style="color: #10b981; background:rgba(16, 185, 129, 0.15);">CSAT</span>`;
                     if (u.permissions.aiSearch) permBadges += `<span class="badge badge-perm" style="color: #8b5cf6; background:rgba(139, 92, 246, 0.15);">AI Search</span>`;
                     if (u.permissions.manageLines) permBadges += `<span class="badge badge-perm" style="color: #f59e0b; background:rgba(245, 158, 11, 0.15);">Call Lines</span>`;
+                    if (u.permissions.viewLineReports) permBadges += `<span class="badge badge-perm" style="color: #06b6d4; background:rgba(6, 182, 212, 0.15);">Line Reports</span>`;
                 }
 
                 const isSelf = State.currentUser.id === u.id;
@@ -4191,6 +4266,18 @@
 
         function updateChartTheme() {
             if(!loadChartInstance) return;
+            // The call-line charts read their tick/grid/legend colours from CSS variables too,
+            // so they have to be repainted on a theme switch or their labels go unreadable.
+            [linesAgentChartInstance, linesLineChartInstance].forEach(c => {
+                if (!c) return;
+                if (c.options.plugins && c.options.plugins.legend) c.options.plugins.legend.labels.color = lineChartTickColor();
+                if (c.options.scales) {
+                    if (c.options.scales.x) { c.options.scales.x.ticks.color = lineChartTickColor(); c.options.scales.x.grid.color = lineChartGridColor(); if (c.options.scales.x.title) c.options.scales.x.title.color = lineChartTickColor(); }
+                    if (c.options.scales.y) c.options.scales.y.ticks.color = lineChartTickColor();
+                }
+                c.update();
+            });
+
             loadChartInstance.data.datasets[0].backgroundColor = getComputedStyle(document.documentElement).getPropertyValue('--chart-bar').trim();
             loadChartInstance.update();
         }
@@ -6870,6 +6957,45 @@ Exported ${escapeHtml(formatZendeskTimestampWithYear(new Date().toISOString()))}
         };
         /* --- Line administration --- */
 
+        // Settings that belong to the call-line module. Deliberately NOT stored in `settings`,
+        // which is owned by admin.html -- this app only ever reads that. Same transactional
+        // write as everything else here, so two admins changing it at once can't clobber
+        // unrelated keys.
+        async function mutateDocObject(field, apply) {
+            try {
+                const result = await runTransaction(db, async (tx) => {
+                    const snap = await tx.get(docRef);
+                    const live = (snap.exists() && snap.data()[field]) || {};
+                    const next = apply({ ...live });
+                    if (!next) return null;
+                    if (snap.exists()) tx.update(docRef, { [field]: next });
+                    else tx.set(docRef, { [field]: next }, { merge: true });
+                    return next;
+                });
+                if (!result) return false;
+                State[field] = result;
+                return true;
+            } catch (err) {
+                console.error(`Update to ${field} failed:`, err);
+                notify('Could not save that setting — check the console.');
+                return false;
+            }
+        }
+
+        window.changeDashboardLineCount = async function(selectEl) {
+            if (!canManageLines()) return notify('You do not have permission to change this.');
+            const raw = selectEl.value;
+            const count = raw === 'all' ? 50 : parseInt(raw, 10);
+            if (!Number.isFinite(count) || count <= 0) return;
+
+            const ok = await mutateDocObject('lineSettings', s => ({ ...s, dashboardCount: count }));
+            if (!ok) return;
+            logActivity('Call Lines', `Dashboard now shows <strong>${raw === 'all' ? 'all' : count}</strong> line(s)`);
+            State.commit(['activities']);
+            renderLinesView();
+            notify(raw === 'all' ? 'Dashboard now shows every line.' : `Dashboard now shows the first ${count} line(s).`);
+        };
+
         async function processAddLine(e) {
             e.preventDefault();
             if (!canManageLines()) return notify('You do not have permission to create lines.');
@@ -6970,6 +7096,31 @@ Exported ${escapeHtml(formatZendeskTimestampWithYear(new Date().toISOString()))}
             notify('Line updated.');
         }
 
+        // The Dashboard shows the first N lines in this order, so the admin needs a way to say
+        // which ones those are. Arrows rather than drag-and-drop: this list is short, and
+        // arrows work on a phone, where the roster's drag handles do not.
+        window.moveLine = async function(id, direction) {
+            if (!canManageLines()) return notify('You do not have permission to reorder lines.');
+            let movedName = '';
+            const ok = await mutateDocArray('lines', lines => {
+                // Sorted and renumbered from scratch, because `order` on older records can be
+                // missing or duplicated -- relying on it being a clean 0..n-1 sequence would
+                // make the swap silently do nothing.
+                const ordered = [...lines].sort((a, b) => (a.order || 0) - (b.order || 0) || String(a.name || '').localeCompare(String(b.name || '')));
+                const i = ordered.findIndex(l => l.id === id);
+                if (i < 0) return null;
+                const j = direction === 'up' ? i - 1 : i + 1;
+                if (j < 0 || j >= ordered.length) return null;
+                movedName = ordered[i].name || '';
+                [ordered[i], ordered[j]] = [ordered[j], ordered[i]];
+                ordered.forEach((l, idx) => { l.order = idx; });
+                return ordered;
+            });
+            if (!ok) return;
+            renderLinesView();
+            notify(`${movedName} moved ${direction}.`);
+        };
+
         window.toggleLineActive = async function(id) {
             if (!canManageLines()) return notify('You do not have permission to change lines.');
             let label = '';
@@ -7034,7 +7185,18 @@ Exported ${escapeHtml(formatZendeskTimestampWithYear(new Date().toISOString()))}
 
         /* --- Rendering --- */
 
+        // Reports are off by default for standard users -- call-line time is performance data,
+        // so it is granted deliberately rather than being visible to everyone who can check in.
+        function canViewLineReports() {
+            const u = State.currentUser;
+            return !!(u && (u.role === 'admin' || (u.permissions && (u.permissions.viewLineReports || u.permissions.manageLines))));
+        }
+
         window.switchLinesTab = function(tab) {
+            // Checked here as well as by hiding the button, so the tab can't be reached by
+            // calling this directly from the console.
+            if (tab === 'reports' && !canViewLineReports()) return notify('You do not have access to call line reports.');
+            if (tab === 'manage' && !canManageLines()) return notify('You do not have permission to manage lines.');
             linesTab = tab;
             const map = {
                 board: [UI.tabLinesBoard, UI.panelLinesBoard],
@@ -7049,6 +7211,9 @@ Exported ${escapeHtml(formatZendeskTimestampWithYear(new Date().toISOString()))}
                 btn.classList.toggle('btn-outline', !on);
                 panel.classList.toggle('hidden', !on);
             });
+            // Only once the panel is visible -- a chart built against a display:none canvas
+            // measures zero and never resizes itself afterwards.
+            if (tab === 'reports') ensureLineCharts();
             renderLinesView();
         };
 
@@ -7249,21 +7414,33 @@ Exported ${escapeHtml(formatZendeskTimestampWithYear(new Date().toISOString()))}
 
         function renderLinesTable() {
             if (!UI.tableLines) return;
+
+            if (UI.dashLineCount) {
+                const n = dashboardLineCount();
+                UI.dashLineCount.value = n >= 50 ? 'all' : String(n);
+            }
+
             const lines = sortedLines();
             const open = openLineSessions();
 
             if (lines.length === 0) {
-                UI.tableLines.innerHTML = `<tr><td colspan="4" style="text-align:center; color: var(--text-muted); padding: 2rem;">No lines created yet.</td></tr>`;
+                UI.tableLines.innerHTML = `<tr><td colspan="5" style="text-align:center; color: var(--text-muted); padding: 2rem;">No lines created yet.</td></tr>`;
                 return;
             }
 
-            UI.tableLines.innerHTML = lines.map(line => {
+            UI.tableLines.innerHTML = lines.map((line, idx) => {
                 const used = open.filter(s => s.lineId === line.id).length;
                 const closed = line.isActive === false;
-                return `<tr>
+                const onDash = idx < dashboardLineCount();
+                return `<tr${onDash ? ' class="line-on-dash"' : ''}>
                     <td>
                         <strong>${escapeHtml(line.name)}</strong>
+                        ${onDash ? ' <span class="badge" style="color:#8b5cf6; background:rgba(139,92,246,0.15);" title="Shown on the Dashboard">Dashboard</span>' : ''}
                         ${line.description ? `<div style="font-size:0.78rem; color: var(--text-muted);">${escapeHtml(line.description)}</div>` : ''}
+                    </td>
+                    <td style="white-space: nowrap;">
+                        <button class="btn-icon" title="Move up"${idx === 0 ? ' disabled' : ''} onclick="window.moveLine('${escapeHtml(line.id)}', 'up')"><svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="18 15 12 9 6 15"></polyline></svg></button>
+                        <button class="btn-icon" title="Move down"${idx === lines.length - 1 ? ' disabled' : ''} onclick="window.moveLine('${escapeHtml(line.id)}', 'down')"><svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg></button>
                     </td>
                     <td>${used}${line.capacity ? ` / ${line.capacity}` : ' <span style="color: var(--text-muted); font-size:0.78rem;">(unlimited)</span>'}</td>
                     <td><span class="badge" style="${closed ? 'color:#f43f5e; background:rgba(244,63,94,0.15);' : 'color:#10b981; background:rgba(16,185,129,0.15);'}">${closed ? 'Closed' : 'Open'}</span></td>
@@ -7279,37 +7456,32 @@ Exported ${escapeHtml(formatZendeskTimestampWithYear(new Date().toISOString()))}
 
         /* --- Dashboard module + per-line drill-in --- */
 
-        // Lines 1-3 are the ones the floor actually runs on, so they are always on the
-        // Dashboard even when empty -- "nobody is on Line 2" is exactly the thing a manager
-        // needs to see at a glance, and a card that disappears when empty cannot tell them
-        // that. Matching is by name first (so a renamed or reordered "Line 2" still pins) and
-        // falls back to the first three by order for setups that name lines differently.
-        const PINNED_LINE_NAMES = ['line 1', 'line 2', 'line 3'];
+        // The Dashboard shows the first N lines in the order they are arranged in Manage
+        // Lines, N being an admin setting (default 3). An earlier version matched the names
+        // "Line 1/2/3" instead, which broke as soon as a line was called something like
+        // "Line 2 / Opsmon" -- it fell out of the pinned set and the cards rendered out of
+        // order. Position is what the admin controls, so position is what this follows.
+        const DEFAULT_DASHBOARD_LINE_COUNT = 3;
 
-        function pinnedLines() {
-            const all = sortedLines();
-            const byName = PINNED_LINE_NAMES
-                .map(n => all.find(l => (l.name || '').trim().toLowerCase() === n))
-                .filter(Boolean);
-            if (byName.length > 0) return byName;
-            return all.slice(0, 3);
+        function dashboardLineCount() {
+            const n = Number((State.lineSettings || {}).dashboardCount);
+            if (!Number.isFinite(n) || n <= 0) return DEFAULT_DASHBOARD_LINE_COUNT;
+            return Math.min(Math.floor(n), 50);
         }
 
         function dashboardLines() {
-            const pinned = pinnedLines();
-            const pinnedIds = new Set(pinned.map(l => l.id));
-            const rest = sortedLines().filter(l => !pinnedIds.has(l.id));
-            return { pinned, rest };
+            return sortedLines().slice(0, dashboardLineCount());
         }
 
         function renderDashLines() {
             if (!UI.dashLinesBody) return;
-            const { pinned, rest } = dashboardLines();
+            const shown = dashboardLines();
+            const total = (State.lines || []).length;
             const open = openLineSessions();
             const awayCount = State.agents.filter(isAgentAway).length;
 
-            UI.dashLinesMeta.innerText = (State.lines || []).length
-                ? `${open.length} on a line${awayCount ? ` · ${awayCount} on a break` : ''}`
+            UI.dashLinesMeta.innerText = total
+                ? `${open.length} on a line${awayCount ? ` · ${awayCount} on a break` : ''}${total > shown.length ? ` · showing ${shown.length} of ${total}` : ''}`
                 : '';
 
             if ((State.lines || []).length === 0) {
@@ -7317,11 +7489,11 @@ Exported ${escapeHtml(formatZendeskTimestampWithYear(new Date().toISOString()))}
                 return;
             }
 
-            const card = (line, pinnedFlag) => {
+            const card = (line) => {
                 const occupants = open.filter(s => s.lineId === line.id)
                     .sort((a, b) => new Date(a.checkInAt).getTime() - new Date(b.checkInAt).getTime());
                 const closed = line.isActive === false;
-                return `<div class="dash-line-card${closed ? ' closed' : ''}${pinnedFlag ? ' pinned' : ''}" onclick="window.openLineDrill('${escapeHtml(line.id)}')" title="Click for ${escapeHtml(line.name)} details">
+                return `<div class="dash-line-card${closed ? ' closed' : ''}" onclick="window.openLineDrill('${escapeHtml(line.id)}')" title="Click for ${escapeHtml(line.name)} details">
                     <div class="dash-line-head">
                         <span class="dash-line-name">${escapeHtml(line.name)}</span>
                         <span class="badge">${occupants.length}${line.capacity ? ` / ${line.capacity}` : ''}</span>
@@ -7333,8 +7505,7 @@ Exported ${escapeHtml(formatZendeskTimestampWithYear(new Date().toISOString()))}
             };
 
             UI.dashLinesBody.innerHTML = `<div class="dash-line-grid">`
-                + pinned.map(l => card(l, true)).join('')
-                + rest.map(l => card(l, false)).join('')
+                + shown.map(card).join('')
                 + `</div>`
                 + renderAwayStrip();
         }
@@ -7471,6 +7642,8 @@ Exported ${escapeHtml(formatZendeskTimestampWithYear(new Date().toISOString()))}
             const sessions = getFilteredLineSessions();
             const nowMs = Date.now();
             const stillOpen = sessions.filter(s => !s.checkOutAt).length;
+
+            updateLineCharts(sessions, nowMs);
 
             const byAgent = new Map();
             const byLine = new Map();
@@ -7723,6 +7896,161 @@ Exported ${escapeHtml(formatZendeskTimestampWithYear(new Date().toISOString()))}
             renderLinesView();
             notify('Line record deleted.');
         };
+
+        /* --- Report charts ---
+           Two views of the same numbers: a stacked bar where each agent's bar length is their
+           total time on the phones and each segment is one line (so "how long was X on a line"
+           and "which lines was that on" are answered by the same picture), and a doughnut of
+           the totals per line.
+
+           Both are created ONCE and then have their data swapped, never re-created --
+           renderLinesReport runs on every Firestore snapshot, and building a new Chart each
+           time would leak canvases and animations until the tab crawled. */
+
+        let linesAgentChartInstance = null;
+        let linesLineChartInstance = null;
+
+        // Distinct hues rather than shades of one colour, because these identify lines (a
+        // category) rather than measure a quantity. Wraps if someone creates more than 10.
+        const LINE_CHART_COLORS = [
+            '#6366f1', '#10b981', '#f59e0b', '#f43f5e', '#8b5cf6',
+            '#06b6d4', '#84cc16', '#ec4899', '#f97316', '#14b8a6'
+        ];
+
+        function lineChartColor(i) {
+            return LINE_CHART_COLORS[i % LINE_CHART_COLORS.length];
+        }
+
+        function lineChartTickColor() {
+            return getComputedStyle(document.documentElement).getPropertyValue('--text-muted').trim() || '#94a3b8';
+        }
+
+        function lineChartGridColor() {
+            return getComputedStyle(document.documentElement).getPropertyValue('--border-light').trim() || 'rgba(148,163,184,0.2)';
+        }
+
+        // Called when the Reports tab is actually shown. Creating a chart while its canvas is
+        // display:none gives it a zero-size box that it never recovers from, so this is
+        // deliberately not done at boot.
+        function ensureLineCharts() {
+            if (typeof Chart === 'undefined') return;
+
+            if (!linesAgentChartInstance && UI.linesAgentChart) {
+                linesAgentChartInstance = new Chart(UI.linesAgentChart.getContext('2d'), {
+                    type: 'bar',
+                    data: { labels: [], datasets: [] },
+                    options: {
+                        indexAxis: 'y',
+                        responsive: true, maintainAspectRatio: false,
+                        animation: { duration: 300 },
+                        plugins: {
+                            legend: { position: 'bottom', labels: { color: lineChartTickColor(), boxWidth: 12, padding: 14, font: { size: 11 } } },
+                            tooltip: {
+                                callbacks: {
+                                    // Hours are what the axis shows, but "2h 34m" is what a
+                                    // person actually wants to read off a tooltip.
+                                    label: ctx => `${ctx.dataset.label}: ${formatLineDuration(ctx.parsed.x * 3600000)}`,
+                                    footer: items => {
+                                        const total = items.reduce((sum, i) => sum + i.parsed.x, 0);
+                                        return `Total: ${formatLineDuration(total * 3600000)}`;
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            x: {
+                                stacked: true, beginAtZero: true,
+                                title: { display: true, text: 'Hours', color: lineChartTickColor(), font: { size: 11 } },
+                                ticks: { color: lineChartTickColor() }, grid: { color: lineChartGridColor() }, border: { display: false }
+                            },
+                            y: { stacked: true, ticks: { color: lineChartTickColor() }, grid: { display: false }, border: { display: false } }
+                        }
+                    }
+                });
+            }
+
+            if (!linesLineChartInstance && UI.linesLineChart) {
+                linesLineChartInstance = new Chart(UI.linesLineChart.getContext('2d'), {
+                    type: 'doughnut',
+                    data: { labels: [], datasets: [{ data: [], backgroundColor: [], borderWidth: 0 }] },
+                    options: {
+                        responsive: true, maintainAspectRatio: false,
+                        animation: { duration: 300 },
+                        plugins: {
+                            legend: { position: 'right', labels: { color: lineChartTickColor(), boxWidth: 12, padding: 12, font: { size: 11 } } },
+                            tooltip: { callbacks: { label: ctx => `${ctx.label}: ${formatLineDuration(ctx.parsed * 3600000)}` } }
+                        }
+                    }
+                });
+            }
+        }
+
+        function updateLineCharts(sessions, nowMs) {
+            if (!linesAgentChartInstance && !linesLineChartInstance) return;
+
+            // Line order follows Manage Lines so the colours stay put between renders; any
+            // line that only exists in history (deleted since) is appended after.
+            const orderedNames = sortedLines().map(l => l.name);
+            const seen = new Set(orderedNames);
+            sessions.forEach(s => { if (s.lineName && !seen.has(s.lineName)) { seen.add(s.lineName); orderedNames.push(s.lineName); } });
+
+            const perAgent = new Map();   // agent -> Map(line -> ms)
+            const perLine = new Map();    // line -> ms
+            sessions.forEach(s => {
+                const ms = lineSessionDuration(s, nowMs);
+                if (!perAgent.has(s.agentName)) perAgent.set(s.agentName, new Map());
+                const m = perAgent.get(s.agentName);
+                m.set(s.lineName, (m.get(s.lineName) || 0) + ms);
+                perLine.set(s.lineName, (perLine.get(s.lineName) || 0) + ms);
+            });
+
+            // Longest total first, and capped: a chart with forty bars is unreadable, and the
+            // tables below already carry the full list.
+            const agents = [...perAgent.entries()]
+                .map(([name, m]) => ({ name, total: [...m.values()].reduce((a, b) => a + b, 0), m }))
+                .sort((a, b) => b.total - a.total)
+                .slice(0, 20);
+
+            if (linesAgentChartInstance) {
+                const hasData = agents.length > 0;
+                UI.linesAgentChartBox.classList.toggle('hidden', !hasData);
+                UI.linesAgentChartEmpty.classList.toggle('hidden', hasData);
+                if (hasData) {
+                    const usedLines = orderedNames.filter(n => agents.some(a => a.m.has(n)));
+                    linesAgentChartInstance.data.labels = agents.map(a => a.name);
+                    linesAgentChartInstance.data.datasets = usedLines.map((lineName) => ({
+                        label: lineName,
+                        data: agents.map(a => +(((a.m.get(lineName) || 0) / 3600000).toFixed(2))),
+                        backgroundColor: lineChartColor(orderedNames.indexOf(lineName)),
+                        borderRadius: 3,
+                        borderSkipped: false
+                    }));
+                    // Grows with the number of agents so bars stay a readable thickness
+                    // instead of being squeezed into a fixed box.
+                    UI.linesAgentChartBox.style.height = `${Math.max(220, agents.length * 34 + 90)}px`;
+                    linesAgentChartInstance.options.plugins.legend.labels.color = lineChartTickColor();
+                    linesAgentChartInstance.options.scales.x.ticks.color = lineChartTickColor();
+                    linesAgentChartInstance.options.scales.x.grid.color = lineChartGridColor();
+                    linesAgentChartInstance.options.scales.x.title.color = lineChartTickColor();
+                    linesAgentChartInstance.options.scales.y.ticks.color = lineChartTickColor();
+                    linesAgentChartInstance.update();
+                }
+            }
+
+            if (linesLineChartInstance) {
+                const lineRows = orderedNames.filter(n => perLine.has(n));
+                const hasData = lineRows.length > 0;
+                UI.linesLineChartBox.classList.toggle('hidden', !hasData);
+                UI.linesLineChartEmpty.classList.toggle('hidden', hasData);
+                if (hasData) {
+                    linesLineChartInstance.data.labels = lineRows;
+                    linesLineChartInstance.data.datasets[0].data = lineRows.map(n => +((perLine.get(n) / 3600000).toFixed(2)));
+                    linesLineChartInstance.data.datasets[0].backgroundColor = lineRows.map(n => lineChartColor(orderedNames.indexOf(n)));
+                    linesLineChartInstance.options.plugins.legend.labels.color = lineChartTickColor();
+                    linesLineChartInstance.update();
+                }
+            }
+        }
         /* --- Exports --- */
 
         const LINE_EXPORT_HEADERS = ['Agent', 'Line', 'Checked In', 'Checked Out', 'Duration', 'Hours', 'Ended By'];
