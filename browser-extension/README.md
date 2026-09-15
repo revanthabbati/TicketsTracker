@@ -19,7 +19,7 @@ That's it. You'll get a notification whenever a new ticket is assigned to you �
 
 ## My Tickets / Unassigned tabs
 
-The popup has two tabs:
+The popup has three tabs (the third, **Calls**, is covered below):
 - **My Tickets** — your assignments, as above.
 - **Unassigned** — a live view of Zendesk's unassigned queue (same query as the app's Zendesk Queue "Unassigned" tab). A ticket only ever appears here until someone actually assigns it in Zendesk, at which point it drops off this list and (if it was assigned to you) shows up under My Tickets instead.
 
@@ -74,7 +74,32 @@ Separately from your own assignments, this checks Zendesk every 5 minutes for ti
 
 ## Alert sound
 
-On by default (Chime — Ping and Bell are also available in Options, along with an off switch and a Test button). Plays whenever a new-assignment or unassigned-queue notification fires.
+On by default (Chime — Ping and Bell are also available in Options, along with an off switch and a Test button). Plays whenever a new-assignment or unassigned-queue notification fires. Since 1.5.0 you can also set the volume and upload your own sound — see below.
+
+## Volume and your own sounds
+
+Both live on the options page (right-click the toolbar icon → **Options**).
+
+**Volume** is a slider from 0 to 100%. It saves as you move it — there is nothing to click
+afterwards — and **Test** plays at whatever the slider currently shows, so you can find a level
+that carries without making you jump. Alerts play at full volume until you move it, so updating
+the extension never quietly turns your alerts down.
+
+**Your own sounds** lets you upload an audio file to use instead of Chime/Ping/Bell. Uploading
+one selects it straight away; click **Save** to start using it for real alerts. Each uploaded
+sound gets **Use**, **Play** and **Delete**.
+
+- Up to **1 MB per file**, **4 MB in total**. `chrome.storage.local` gives the whole extension
+  10 MB and the ticket caches share it, so uploads get a deliberately modest slice. An alert
+  tone that needs more than 1 MB is the wrong file for the job — trim the clip instead.
+- Any format your browser can play works (MP3, WAV, OGG, M4A). The file is **actually decoded
+  before it is accepted** rather than trusted on its extension, so a file that would fail
+  silently at 2am is rejected while you are looking at it.
+- Sounds are stored **in this browser only**. Nothing is uploaded anywhere, nothing is written
+  to the shared tracker document, and nobody else hears your choice. That also means they do
+  not follow you to another machine — upload again there.
+- Deleting the sound you are currently using puts you back on Chime rather than leaving you
+  with silence.
 
 ## Known limitation
 
@@ -90,7 +115,7 @@ Open the extension's options page again (right-click the toolbar icon → **Opti
 - `firestore.js` — shared helper for reading the tracker's Firestore doc, fetching ticket subjects and the unassigned queue from Zendesk, computing read/unread + badge state, and (1.4.0) writing call-line check-ins safely via an updateTime precondition
 - `background.js` — service worker: polls your assignments every minute and the unassigned queue every 5 minutes via `chrome.alarms`, fires notifications + sounds, updates the badge
 - `popup.html` / `popup.js` — toolbar popup: My Tickets / Unassigned / Calls tabs, mark-as-read controls, line check-in/out and Away
-- `options.html` / `options.js` — setup page: pick your name, alert sound settings
-- `offscreen.html` / `offscreen.js` — hidden document that actually plays the alert sound (MV3 service workers can't play audio directly)
+- `options.html` / `options.js` — setup page: pick your name, alert sound, volume, and uploading/removing your own sounds
+- `offscreen.html` / `offscreen.js` — hidden document that actually plays the alert sound (MV3 service workers can't play audio directly), including resolving and playing uploaded sounds at the chosen volume
 - `icons/` — generated PNG icons (brand purple for the toolbar icon, red/green dots for notifications)
 - `sounds/` — generated WAV alert tones (chime/ping/bell), synthesized locally — no external assets

@@ -30,7 +30,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 chrome.runtime.onMessage.addListener((message) => {
     if (message && message.type === 'pollNow') checkForNewAssignments();
     if (message && message.type === 'testSound' && message.sound) {
-        playSound(message.sound).catch(err => console.error('Tracker Notifier: test sound failed', err));
+        playSound(message.sound, message.volume).catch(err => console.error('Tracker Notifier: test sound failed', err));
     }
 });
 
@@ -40,13 +40,16 @@ chrome.runtime.onMessage.addListener((message) => {
 // exist yet, the sound is passed via the document's URL instead of a runtime
 // message, since a message sent immediately after createDocument() resolves
 // can otherwise race the document's own script still loading (see offscreen.js).
-async function playSound(soundName) {
+async function playSound(soundName, volume) {
+    // Only the choice id and the volume cross this boundary; the offscreen document
+    // reads an uploaded sound's audio out of storage itself (see offscreen.js).
+    const vol = typeof volume === 'number' ? volume : 1;
     const hasDoc = await chrome.offscreen.hasDocument();
     if (hasDoc) {
-        chrome.runtime.sendMessage({ type: 'playSound', sound: soundName });
+        chrome.runtime.sendMessage({ type: 'playSound', sound: soundName, volume: vol });
     } else {
         await chrome.offscreen.createDocument({
-            url: `offscreen.html?sound=${encodeURIComponent(soundName)}`,
+            url: `offscreen.html?sound=${encodeURIComponent(soundName)}&volume=${encodeURIComponent(vol)}`,
             reasons: ['AUDIO_PLAYBACK'],
             justification: 'Play a short alert sound when a ticket is assigned or the queue has unassigned tickets.'
         });
@@ -55,12 +58,14 @@ async function playSound(soundName) {
 
 async function maybePlayAlertSound() {
     try {
-        const { soundEnabled, soundChoice } = await chrome.storage.local.get(['soundEnabled', 'soundChoice']);
+        const { soundEnabled, soundChoice, soundVolume } = await chrome.storage.local.get(['soundEnabled', 'soundChoice', 'soundVolume']);
         if (soundEnabled === false) return; // enabled by default until explicitly turned off
         const sound = soundChoice || 'chime';
         if (sound === 'none') return;
 
-        await playSound(sound);
+        // Full volume until someone moves the slider, so an upgrade never makes
+        // existing alerts quieter than they were.
+        await playSound(sound, typeof soundVolume === 'number' ? soundVolume : 1);
     } catch (err) {
         console.error('Tracker Notifier: failed to play alert sound', err);
     }

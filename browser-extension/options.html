@@ -20,6 +20,23 @@
     .checkbox-row { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
     .checkbox-row input { width: auto; }
     .checkbox-row label { margin-bottom: 0; }
+    .hint { font-size: 0.78rem; color: #64748b; margin-top: 6px; }
+    input[type="range"] { width: 100%; accent-color: #6366f1; padding: 0; background: transparent; border: none; }
+    input[type="file"] { width: 100%; padding: 9px; font-size: 0.82rem; border-radius: 8px; border: 1px dashed rgba(255,255,255,0.2); background: #1a1a26; color: #94a3b8; box-sizing: border-box; cursor: pointer; }
+    input[type="file"]::file-selector-button { background: #6366f1; color: #fff; border: none; border-radius: 6px; padding: 5px 10px; margin-right: 10px; font-size: 0.8rem; cursor: pointer; }
+    #sound-upload-status { margin-top: 10px; font-size: 0.82rem; min-height: 1.2em; color: #10b981; }
+    #sound-upload-status.error { color: #f43f5e; }
+    #custom-sound-list { margin-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+    .custom-sound { display: flex; align-items: center; gap: 10px; background: #1a1a26; border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; padding: 8px 10px; }
+    .custom-sound-name { flex: 1; font-size: 0.85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .custom-sound-size { font-size: 0.72rem; color: #64748b; flex-shrink: 0; }
+    .custom-sound button { width: auto; flex-shrink: 0; background: transparent; border: 1px solid rgba(255,255,255,0.15); padding: 4px 9px; font-size: 0.75rem; font-weight: 500; }
+    .custom-sound button:hover { background: rgba(255,255,255,0.06); }
+    .custom-sound button.danger { color: #f43f5e; border-color: rgba(244,63,94,0.35); }
+    .custom-sound button.danger:hover { background: rgba(244,63,94,0.12); }
+    .custom-sound.in-use { border-color: rgba(99,102,241,0.6); }
+    .custom-sound-tag { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.04em; color: #a5b4fc; flex-shrink: 0; }
+    .storage-note { font-size: 0.75rem; color: #64748b; margin-top: 10px; }
     #status { margin-top: 12px; font-size: 0.85rem; color: #10b981; min-height: 1.2em; }
     #status.error { color: #f43f5e; }
 </style>
@@ -46,6 +63,18 @@
         </select>
         <button id="btn-test-sound" type="button">Test</button>
     </div>
+
+    <label for="sound-volume" style="margin-top: 16px;">Volume &mdash; <span id="sound-volume-label">100%</span></label>
+    <input type="range" id="sound-volume" min="0" max="100" step="5" value="100">
+    <p class="hint">Test plays at the volume set here, so you can find a level that carries without startling you.</p>
+
+    <h2>Your own sounds</h2>
+    <p>Upload a short audio file to use instead of the built-in tones. It is saved in this browser only &mdash; nothing is sent anywhere, and it doesn't change what anyone else hears.</p>
+    <div class="row">
+        <input type="file" id="sound-upload" accept="audio/*">
+    </div>
+    <div id="sound-upload-status"></div>
+    <div id="custom-sound-list"></div>
 
     <script src="firestore.js"></script>
     <script src="options.js"></script>
