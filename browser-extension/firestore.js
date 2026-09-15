@@ -34,7 +34,7 @@ function parseFirestoreFields(fields, key) {
 }
 
 // Fetches the tracker's shared state doc and returns plain { tickets, agents,
-// settings } data. Throws on any network/HTTP failure -- callers decide how
+// settings, lines, lineSessions } data. Throws on any network/HTTP failure -- callers decide how
 // to handle it.
 async function fetchState() {
     const res = await fetch(FIRESTORE_DOC_URL);
@@ -44,7 +44,9 @@ async function fetchState() {
     return {
         tickets: parseFirestoreFields(fields, 'tickets'),
         agents: parseFirestoreFields(fields, 'agents'),
-        settings: fields.settings ? parseFirestoreValue(fields.settings) : {}
+        settings: fields.settings ? parseFirestoreValue(fields.settings) : {},
+        lines: parseFirestoreFields(fields, 'lines'),
+        lineSessions: parseFirestoreFields(fields, 'lineSessions')
     };
 }
 
@@ -206,4 +208,232 @@ async function markTicketsUnread(ticketIds) {
     await chrome.storage.local.set({ readTicketIds: updated });
     applyBadge(computeBadge(myTickets, updated));
     return updated;
+}
+
+/* --- WRITING (call lines) ---
+   Until now this extension was strictly read-only. Checking in and out of a line means it
+   has to write, and `lineSessions` is a shared array that everyone on shift writes at once --
+   exactly the shape of data that a naive read-append-PATCH destroys, because it would
+   overwrite anyone who wrote between our read and our write. The main app avoids that with
+   runTransaction; over the REST API the equivalent is an updateTime precondition, below. */
+
+const FIRESTORE_DOC_NAME =
+    'projects/routerpro-bbf42/databases/(default)/documents/routerpro/system_state_v11';
+const FIRESTORE_COMMIT_URL =
+    'https://firestore.googleapis.com/v1/projects/routerpro-bbf42/databases/(default)/documents:commit';
+
+// The inverse of parseFirestoreValue. Integers have to go out as strings -- Firestore's REST
+// API returns integerValue as a string and rejects a JSON number there.
+function toFirestoreValue(v) {
+    if (v === null || v === undefined) return { nullValue: null };
+    if (typeof v === 'string') return { stringValue: v };
+    if (typeof v === 'boolean') return { booleanValue: v };
+    if (typeof v === 'number') {
+        if (!isFinite(v)) return { nullValue: null };
+        return Number.isInteger(v) ? { integerValue: String(v) } : { doubleValue: v };
+    }
+    if (Array.isArray(v)) return { arrayValue: { values: v.map(toFirestoreValue) } };
+    if (typeof v === 'object') {
+        const fields = {};
+        // undefined is not representable in Firestore and makes the whole commit 400, so
+        // those keys are dropped rather than sent as null -- dropping matches how the web
+        // SDK behaves for an absent property.
+        Object.keys(v).forEach(k => { if (v[k] !== undefined) fields[k] = toFirestoreValue(v[k]); });
+        return { mapValue: { fields } };
+    }
+    return { nullValue: null };
+}
+
+// Same GET as fetchState, but keeps the document's updateTime, which is the token the
+// conditional write below needs.
+async function fetchDocSnapshot() {
+    const res = await fetch(FIRESTORE_DOC_URL, { cache: 'no-store' });
+    if (!res.ok) throw new Error(`Firestore returned ${res.status}`);
+    const data = await res.json();
+    return { fields: data.fields || {}, updateTime: data.updateTime };
+}
+
+function readArrayField(fields, key) {
+    if (!fields || !fields[key]) return [];
+    return parseFirestoreValue(fields[key]) || [];
+}
+
+/**
+ * Read-modify-write against the shared doc, safely.
+ *
+ * `mutate(fields)` gets the live document fields and returns an object of top-level fields to
+ * write, or null to abort without writing. The commit carries the updateTime observed at read
+ * time as a precondition, so if anybody else wrote in between, Firestore rejects it and we
+ * start over from a fresh read instead of clobbering them. updateMask means only the named
+ * fields are touched -- everything else in the document is left exactly as it was.
+ */
+async function updateSharedFields(mutate, attempts = 4) {
+    let lastConflict = null;
+    for (let attempt = 0; attempt < attempts; attempt++) {
+        const snap = await fetchDocSnapshot();
+        const result = mutate(snap.fields);
+        if (!result || !result.payload) return { ok: true, skipped: true, reason: result && result.reason };
+
+        const fields = {};
+        Object.keys(result.payload).forEach(k => { fields[k] = toFirestoreValue(result.payload[k]); });
+
+        const res = await fetch(FIRESTORE_COMMIT_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                writes: [{
+                    update: { name: FIRESTORE_DOC_NAME, fields },
+                    updateMask: { fieldPaths: Object.keys(result.payload) },
+                    currentDocument: { updateTime: snap.updateTime }
+                }]
+            })
+        });
+
+        if (res.ok) return { ok: true, info: result.info };
+
+        let detail = '';
+        try { detail = JSON.stringify(await res.json()); } catch (err) { detail = `HTTP ${res.status}`; }
+
+        // Somebody committed between our read and our write. That is the precondition doing
+        // its job -- re-read and reapply rather than forcing the write through.
+        if (/FAILED_PRECONDITION|ABORTED/i.test(detail) || res.status === 409) {
+            lastConflict = detail;
+            continue;
+        }
+        if (res.status === 401 || res.status === 403) {
+            throw new Error('Firestore rejected the write (permission denied). The tracker document allows writes from the app, so if this appears, check the project\'s security rules.');
+        }
+        throw new Error(`Firestore write failed: ${detail}`);
+    }
+    return { ok: false, conflict: true, detail: lastConflict };
+}
+
+/* --- Call line operations. These mirror the rules enforced in index.html; the two cannot
+   share code (no bundler, different runtimes), so the invariants are restated here:
+   one open session per agent, capacity is never exceeded, switching closes the previous
+   session, and going Away closes the session AND drops floor availability. --- */
+
+function openSessionsFor(sessions) {
+    return sessions.filter(s => s && !s.checkOutAt);
+}
+
+function extLineSessionDuration(s, nowMs) {
+    const start = new Date(s.checkInAt).getTime();
+    if (isNaN(start)) return 0;
+    const end = s.checkOutAt ? new Date(s.checkOutAt).getTime() : (nowMs || Date.now());
+    return Math.max(0, end - start);
+}
+
+function extCloseSession(s, whenIso, byEmail, reason) {
+    return {
+        ...s,
+        checkOutAt: whenIso,
+        checkOutBy: byEmail || '',
+        durationMs: extLineSessionDuration({ ...s, checkOutAt: whenIso }),
+        endedReason: reason || 'manual'
+    };
+}
+
+function newSessionId() {
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
+    return 'ext-' + Date.now() + '-' + Math.random().toString(16).slice(2);
+}
+
+async function lineCheckIn(agentId, agentName, lineId) {
+    const nowIso = new Date().toISOString();
+    return updateSharedFields(fields => {
+        const lines = readArrayField(fields, 'lines');
+        const sessions = readArrayField(fields, 'lineSessions');
+        const line = lines.find(l => l.id === lineId);
+        if (!line) return { payload: null, reason: 'That line no longer exists.' };
+        if (line.isActive === false) return { payload: null, reason: `${line.name} is closed for check-in.` };
+
+        const open = openSessionsFor(sessions);
+        const mine = open.find(s => s.agentId === agentId);
+        if (mine && mine.lineId === lineId) return { payload: null, reason: `You are already on ${line.name}.` };
+
+        const occupants = open.filter(s => s.lineId === lineId).length;
+        if (line.capacity && occupants >= line.capacity) {
+            return { payload: null, reason: `${line.name} is full (${occupants}/${line.capacity}).` };
+        }
+
+        let next = sessions;
+        if (mine) next = next.map(s => (s.id === mine.id ? extCloseSession(s, nowIso, '', 'switch') : s));
+        next = next.concat([{
+            id: newSessionId(),
+            lineId: line.id,
+            lineName: line.name,
+            agentId,
+            agentName,
+            userEmail: '',
+            checkInAt: nowIso,
+            checkInBy: '',
+            checkOutAt: null,
+            checkOutBy: '',
+            durationMs: 0,
+            endedReason: ''
+        }]);
+        return { payload: { lineSessions: next }, info: { lineName: line.name, switched: mine ? mine.lineName : null } };
+    });
+}
+
+async function lineCheckOut(agentId) {
+    const nowIso = new Date().toISOString();
+    return updateSharedFields(fields => {
+        const sessions = readArrayField(fields, 'lineSessions');
+        const mine = openSessionsFor(sessions).find(s => s.agentId === agentId);
+        if (!mine) return { payload: null, reason: 'You are not checked in to a line.' };
+        const closed = extCloseSession(mine, nowIso, '', 'manual');
+        return {
+            payload: { lineSessions: sessions.map(s => (s.id === mine.id ? closed : s)) },
+            info: { lineName: mine.lineName, durationMs: closed.durationMs }
+        };
+    });
+}
+
+// Away has to move two things at once: close the line session (or break time is counted as
+// time on calls) and clear floor availability (or tickets keep being assigned to someone who
+// has stepped away). Both live in one commit so they can never end up half-applied.
+async function setPresence(agentId, away) {
+    const nowIso = new Date().toISOString();
+    return updateSharedFields(fields => {
+        const agents = readArrayField(fields, 'agents');
+        const sessions = readArrayField(fields, 'lineSessions');
+        const agent = agents.find(a => a.id === agentId);
+        if (!agent) return { payload: null, reason: 'Your agent record was not found.' };
+
+        let nextSessions = sessions;
+        let closedLineName = null;
+        let closedLineId = null;
+        let resumeLineId = null;
+
+        if (away) {
+            const mine = openSessionsFor(sessions).find(s => s.agentId === agentId);
+            if (mine) {
+                closedLineName = mine.lineName;
+                closedLineId = mine.lineId;
+                nextSessions = sessions.map(s => (s.id === mine.id ? extCloseSession(s, nowIso, '', 'break') : s));
+            }
+        } else {
+            // Captured before the field is cleared below, so the caller can put them back.
+            resumeLineId = agent.awayFromLineId || null;
+        }
+
+        const nextAgents = agents.map(a => {
+            if (a.id !== agentId) return a;
+            const updated = { ...a, presence: away ? 'away' : 'in', presenceSince: nowIso, isAvailable: !away };
+            if (away) {
+                // Only overwrite when they were actually on a line, so pressing Away twice
+                // doesn't erase where they came from.
+                if (closedLineId) updated.awayFromLineId = closedLineId;
+            } else {
+                updated.awayFromLineId = '';
+            }
+            return updated;
+        });
+
+        const payload = { agents: nextAgents };
+        if (nextSessions !== sessions) payload.lineSessions = nextSessions;
+        return { payload, info: { closedLineName, resumeLineId } };
+    });
 }

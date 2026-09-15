@@ -5,7 +5,7 @@ A small local browser extension that notifies you when a ticket gets assigned to
 - 🔴 **Red** — assigned, initial response (IR) not sent yet
 - 🟢 **Green** — IR already sent
 
-It reads the same shared Firestore document the tracker app itself uses (read-only, no changes are made to your data).
+It reads the same shared Firestore document the tracker app itself uses. Ticket notifications are read-only; the **Calls** tab (added in 1.4.0) is the only part that writes anything, and it only ever touches your own call-line session and your own availability flag.
 
 ## Install (Chrome / Edge / Brave)
 
@@ -22,6 +22,42 @@ That's it. You'll get a notification whenever a new ticket is assigned to you �
 The popup has two tabs:
 - **My Tickets** — your assignments, as above.
 - **Unassigned** — a live view of Zendesk's unassigned queue (same query as the app's Zendesk Queue "Unassigned" tab). A ticket only ever appears here until someone actually assigns it in Zendesk, at which point it drops off this list and (if it was assigned to you) shows up under My Tickets instead.
+
+## Calls tab
+
+Check in and out of a call line without opening the tracker. It shows:
+
+- **your status** — which line you're on and how long you've been on it, counting up live
+- **Line picker + Check In** — full and closed lines aren't offered. Checking in while already
+  on a line *moves* you, closing the previous session so your time is never counted twice.
+- **Check Out** — ends the session and records the duration
+- **Set Away / I'm Back** — for breaks. Going Away checks you out of your line **and** turns off
+  your availability on the floor, so the tracker stops assigning you tickets. Coming back turns
+  availability on again and puts you back on the line you left, if a seat is still free.
+- **the live board** — who is on each line right now, and who is on a break
+
+Everything syncs with the main app, because both write the same Firestore document. The app
+shows the same board under its own **Call Lines** tab.
+
+The tab acts as whoever you picked in setup, so make sure that's you — see *Changing your
+identity* below.
+
+### How it writes safely
+
+Everyone on shift writes the same `lineSessions` array at once. Reading it, appending, and
+writing the whole thing back would silently erase anyone who wrote in between — that is what
+once cost the tracker five user accounts on a different array.
+
+The extension has no Firebase SDK, so it can't use the app's `runTransaction`. It uses the REST
+equivalent instead: the document's `updateTime` is captured when reading and sent back as a
+precondition on the write. If anyone committed in the meantime, Firestore rejects it and the
+extension re-reads and reapplies rather than forcing the write through. After a few failed
+attempts it gives up and tells you to try again, which is the correct outcome — it never
+overwrites somebody else's session. `updateMask` limits each write to the fields it actually
+changes, so nothing else in the document is touched.
+
+`node tools/lines-ext-check.js` from the repo root exercises all of this against a fake that
+enforces Firestore's real REST contract, including a simulated concurrent write.
 
 ## Marking tickets as read
 
@@ -51,9 +87,9 @@ Open the extension's options page again (right-click the toolbar icon → **Opti
 ## Files
 
 - `manifest.json` — extension manifest (Manifest V3)
-- `firestore.js` — shared helper for reading the tracker's Firestore doc, fetching ticket subjects and the unassigned queue from Zendesk, and computing read/unread + badge state (used by all contexts below)
+- `firestore.js` — shared helper for reading the tracker's Firestore doc, fetching ticket subjects and the unassigned queue from Zendesk, computing read/unread + badge state, and (1.4.0) writing call-line check-ins safely via an updateTime precondition
 - `background.js` — service worker: polls your assignments every minute and the unassigned queue every 5 minutes via `chrome.alarms`, fires notifications + sounds, updates the badge
-- `popup.html` / `popup.js` — toolbar popup: My Tickets / Unassigned tabs, mark-as-read controls
+- `popup.html` / `popup.js` — toolbar popup: My Tickets / Unassigned / Calls tabs, mark-as-read controls, line check-in/out and Away
 - `options.html` / `options.js` — setup page: pick your name, alert sound settings
 - `offscreen.html` / `offscreen.js` — hidden document that actually plays the alert sound (MV3 service workers can't play audio directly)
 - `icons/` — generated PNG icons (brand purple for the toolbar icon, red/green dots for notifications)

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Tickets Assignment Tracker Notifier",
-  "version": "1.3.0",
-  "description": "Local notifier for the Tickets Assignment Tracker -- alerts you when a ticket is assigned to you, shows whether the initial response has been sent, and warns when the Zendesk queue has unassigned tickets.",
+  "version": "1.4.0",
+  "description": "Local notifier for the Tickets Assignment Tracker -- alerts you when a ticket is assigned to you, shows whether the initial response has been sent, warns when the Zendesk queue has unassigned tickets, and lets you check in and out of a call line or set yourself away.",
   "permissions": ["storage", "alarms", "notifications", "offscreen"],
   "host_permissions": ["https://firestore.googleapis.com/*", "https://*.workers.dev/*"],
   "background": {

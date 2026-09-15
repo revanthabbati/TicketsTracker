@@ -71,7 +71,7 @@ clicking through the app because they need two people acting at once.
 node tools/lines-check.js
 ```
 
-Runs 45 assertions covering:
+Runs 65 assertions covering:
 
 - **seat capacity under a race** — two agents taking the last seat at the same instant, with a
   second client deliberately committing mid-transaction. A line must never exceed its capacity.
@@ -83,11 +83,45 @@ Runs 45 assertions covering:
   one is never pruned, however old, or an agent would silently lose a running session.
 - duration maths, including malformed and reversed timestamps.
 - identity resolution (user → agent record via `zendeskAgentEmail`) and the permission helper.
-- that writes touch **only** `lineSessions`/`lines` and leave `users`, `agents` and `tickets`
+- **Away / breaks** — that going Away closes the line session *and* clears floor availability,
+  remembers the line, restores both on return, and leaves every other agent's record untouched.
+  This one matters because it writes the `agents` array, which the round-robin and the shift
+  evaluator both depend on.
+- that writes touch **only** the fields they should and leave `users` and `tickets`
   byte-identical.
 
 It reads the functions out of `index.html` at runtime, so it tests what actually ships. It
 talks to nothing — no Firestore, no Zendesk, no credentials, no production data.
+
+## `lines-ext-check.js`
+
+Checks that the **browser extension** can write call-line check-ins to the shared Firestore
+document without destroying anyone else's data.
+
+```bash
+node tools/lines-ext-check.js
+```
+
+The extension has no Firebase SDK and so no `runTransaction`; it uses an `updateTime`
+precondition on the REST commit instead. `fetch` is faked here with a server that enforces
+Firestore's actual REST contract, so the two mistakes that would only surface in production
+fail here instead:
+
+- **integers must be sent as strings** (`{integerValue: "42"}`) — Firestore rejects a JSON
+  number there, and nothing in the browser would tell you until a real write 400s.
+- **a stale `updateTime` must be rejected**, and the extension must then re-read and reapply.
+  One test commits a competing session mid-flight and asserts that it **survives** our write.
+
+It also covers capacity, closed lines, line switching, check-out, and that Away clears floor
+availability and closes the line session in a *single* commit, so it can never half-apply.
+
+Like the other harnesses it reads the real functions out of `browser-extension/firestore.js`
+at runtime. No network, no credentials, no production data.
+
+**What it cannot tell you:** whether the project's Firestore security rules permit an
+unauthenticated REST write at all. Only a real request answers that, so the first time anyone
+loads v1.4.0, check that a check-in actually sticks. If rules reject it the popup says
+"permission denied" rather than failing silently.
 
 ## Diagnosing a bad answer in the app
 

@@ -78,6 +78,7 @@ const factory = new Function(...Object.keys(globals), `
     return { mutateDocArray, performLineCheckIn, performLineCheckOut, pruneLineSessions,
              lineSessionDuration, formatLineDuration, formatLineHours, closeLineSession,
              openLineSessions, canManageLines, myLineIdentity, LINE_SESSION_CAP,
+             setAgentPresence, isAgentAway, agentPresence, PRESENCE_AWAY,
              lineCheckIn: window.lineCheckIn, lineCheckOut: window.lineCheckOut };
 `);
 const L = factory(...Object.values(globals));
@@ -213,6 +214,53 @@ const C = { agentId: 'a3', agentName: 'Cara', userEmail: 'cara@x.com', linked: t
     check('missing permissions object is safe', L.canManageLines() === false);
     State.currentUser = null;
     check('signed out cannot manage', L.canManageLines() === false);
+
+    console.log('\n12. Away closes the line session and takes the agent off the floor');
+    reset([LINE1, LINE2], []);
+    doc.agents = [
+        { id: 'a1', name: 'Asha', isAvailable: true, zendeskEmail: 'asha@x.com', shifts: { 1: { start: '21:00', end: '06:00' } } },
+        { id: 'a2', name: 'Ben', isAvailable: true, zendeskEmail: 'ben@x.com' }
+    ];
+    State.agents = doc.agents;
+    State.currentUser = { id: 'u1', email: 'x@y.z', role: 'admin', permissions: {} };
+    await L.performLineCheckIn(LINE1, A, 'x');
+    let res = await L.setAgentPresence('a1', L.PRESENCE_AWAY);
+    check('away applied', res.ok === true, JSON.stringify(res));
+    check('taken off the floor', doc.agents.find(a => a.id === 'a1').isAvailable === false);
+    check('presence recorded', doc.agents.find(a => a.id === 'a1').presence === 'away');
+    check('line session closed as a break', doc.lineSessions.some(s => s.endedReason === 'break'));
+    check('nobody left on a line', doc.lineSessions.filter(s => !s.checkOutAt).length === 0);
+    check('the line is remembered', doc.agents.find(a => a.id === 'a1').awayFromLineId === 'L1');
+    check('the other agent is untouched', doc.agents.find(a => a.id === 'a2').isAvailable === true);
+    // The agents array carries fields nothing here touches -- they must survive the write,
+    // since this is the array the round-robin and shift evaluator depend on.
+    check('unrelated agent fields survive', !!doc.agents.find(a => a.id === 'a1').shifts['1']);
+    check('other top-level arrays survive', doc.users.length === 1 && doc.tickets.length === 1 && doc.lines.length === 2);
+
+    console.log('\n13. Coming back restores the floor and the line');
+    res = await L.setAgentPresence('a1', 'in');
+    check('back applied', res.ok === true);
+    check('back on the floor', doc.agents.find(a => a.id === 'a1').isAvailable === true);
+    check('presence cleared', doc.agents.find(a => a.id === 'a1').presence === 'in');
+    check('resumed the line they left', doc.lineSessions.some(s => !s.checkOutAt && s.agentId === 'a1' && s.lineId === 'L1'), JSON.stringify(doc.lineSessions.map(s => s.lineName + ':' + !!s.checkOutAt)));
+    check('remembered line cleared', doc.agents.find(a => a.id === 'a1').awayFromLineId === '');
+    check('resume reported to the caller', res.resumedLineName === 'Line 1', JSON.stringify(res));
+
+    console.log('\n14. Away is tied to availability, so the two can never disagree');
+    check('away + unavailable reads as away', L.isAgentAway({ presence: 'away', isAvailable: false }) === true);
+    check('away flag alone does NOT read as away', L.isAgentAway({ presence: 'away', isAvailable: true }) === false);
+    check('plain unavailable is not away', L.isAgentAway({ isAvailable: false }) === false);
+    check('undefined agent is safe', L.isAgentAway(undefined) === false);
+
+    console.log('\n15. Going Away twice does not lose the remembered line');
+    reset([LINE1], []);
+    doc.agents = [{ id: 'a1', name: 'Asha', isAvailable: true, zendeskEmail: 'asha@x.com' }];
+    State.agents = doc.agents;
+    await L.performLineCheckIn(LINE1, A, 'x');
+    await L.setAgentPresence('a1', L.PRESENCE_AWAY);
+    const remembered = doc.agents.find(a => a.id === 'a1').awayFromLineId;
+    await L.setAgentPresence('a1', L.PRESENCE_AWAY);
+    check('still remembers the line', doc.agents.find(a => a.id === 'a1').awayFromLineId === remembered && remembered === 'L1');
 
     console.log(`\n${pass} passed, ${fail} failed\n`);
     process.exit(fail === 0 ? 0 : 1);

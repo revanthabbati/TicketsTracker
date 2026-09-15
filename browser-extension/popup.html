@@ -39,6 +39,36 @@
     .empty, .setup { padding: 24px 14px; text-align: center; color: #94a3b8; font-size: 0.82rem; }
     .setup button { margin-top: 10px; background: #6366f1; color: white; border: none; border-radius: 6px; padding: 8px 14px; font-size: 0.82rem; cursor: pointer; }
     .setup button:hover { background: #4f46e5; }
+    .call-status { padding: 12px 14px; border-bottom: 1px solid rgba(255,255,255,0.08); }
+    .call-status-label { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700; color: #10b981; display: flex; align-items: center; gap: 6px; }
+    .call-status-label.off { color: #94a3b8; }
+    .call-status-label.away { color: #f59e0b; }
+    .call-status-label::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: currentColor; box-shadow: 0 0 8px currentColor; }
+    .call-status-main { font-size: 1.5rem; font-weight: 700; margin-top: 4px; font-variant-numeric: tabular-nums; }
+    .call-status-sub { font-size: 0.75rem; color: #94a3b8; margin-top: 2px; }
+    .call-controls { padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; border-bottom: 1px solid rgba(255,255,255,0.08); }
+    .call-field { display: flex; flex-direction: column; gap: 4px; }
+    .call-field span { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.05em; color: #94a3b8; font-weight: 600; }
+    .call-field select { padding: 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.15); background: #1a1a26; color: #e2e8f0; font-size: 0.82rem; }
+    .call-buttons { display: flex; gap: 6px; }
+    .call-buttons button { flex: 1; background: transparent; border: 1px solid rgba(255,255,255,0.15); color: #e2e8f0; border-radius: 6px; padding: 7px 10px; font-size: 0.78rem; cursor: pointer; }
+    .call-buttons button:hover:not(:disabled) { background: rgba(255,255,255,0.06); }
+    .call-buttons button:disabled { opacity: 0.45; cursor: not-allowed; }
+    .call-buttons button.call-primary { background: #6366f1; border-color: #6366f1; font-weight: 600; }
+    .call-buttons button.call-primary:hover:not(:disabled) { background: #4f46e5; }
+    .call-buttons button.call-danger { background: #e11d48; border-color: #e11d48; font-weight: 600; }
+    .call-buttons button.call-danger:hover:not(:disabled) { background: #be123c; }
+    .call-buttons button.call-away-on { background: #f59e0b; border-color: #f59e0b; color: #1a1a26; font-weight: 700; }
+    #call-message { font-size: 0.75rem; min-height: 1em; color: #94a3b8; }
+    #call-message.error { color: #f43f5e; }
+    #call-message.ok { color: #10b981; }
+    .call-board { max-height: 240px; overflow-y: auto; }
+    .call-line-row { padding: 8px 14px; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 0.8rem; }
+    .call-line-head { display: flex; align-items: center; gap: 8px; }
+    .call-line-name { font-weight: 700; flex: 1; }
+    .call-line-cap { color: #64748b; font-size: 0.72rem; }
+    .call-line-people { color: #94a3b8; font-size: 0.75rem; margin-top: 3px; }
+    .call-line-people .me { color: #a855f7; font-weight: 700; }
     .hidden { display: none; }
 </style>
 </head>
@@ -55,6 +85,7 @@
         <div class="tabs">
             <button class="tab-btn active" id="tab-btn-mine" data-tab="mine">My Tickets <span class="tab-count hidden" id="mine-count">0</span></button>
             <button class="tab-btn" id="tab-btn-unassigned" data-tab="unassigned">Unassigned <span class="tab-count hidden" id="unassigned-count">0</span></button>
+            <button class="tab-btn" id="tab-btn-calls" data-tab="calls">Calls <span class="tab-count hidden" id="calls-count">0</span></button>
         </div>
 
         <div id="panel-mine">
@@ -68,6 +99,32 @@
             <div id="list"></div>
         </div>
 
+
+        <div id="panel-calls" class="hidden">
+            <div class="call-status" id="call-status">
+                <div class="call-status-label" id="call-status-label">Loading…</div>
+                <div class="call-status-main" id="call-status-main"></div>
+                <div class="call-status-sub" id="call-status-sub"></div>
+            </div>
+
+            <div class="call-controls">
+                <label class="call-field">
+                    <span>Line</span>
+                    <select id="call-line-select"><option value="">Loading lines…</option></select>
+                </label>
+                <div class="call-buttons">
+                    <button id="btn-call-checkin" class="call-primary">Check In</button>
+                    <button id="btn-call-checkout" class="call-danger hidden">Check Out</button>
+                </div>
+                <div class="call-buttons">
+                    <button id="btn-call-presence">Set Away</button>
+                    <button id="btn-call-refresh">Refresh</button>
+                </div>
+                <div id="call-message"></div>
+            </div>
+
+            <div class="call-board" id="call-board"></div>
+        </div>
         <div id="panel-unassigned" class="hidden">
             <div class="actions">
                 <span id="unassigned-summary" style="font-size:0.78rem; color:#94a3b8;"></span>
