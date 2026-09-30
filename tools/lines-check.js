@@ -81,6 +81,8 @@ const factory = new Function(...Object.keys(globals), `
              setAgentPresence, isAgentAway, agentPresence, PRESENCE_AWAY,
              dashboardLineCount, dashboardLines, canViewLineReports, mutateDocObject,
              autoAssignRoster, rosterSlotHours, parseRosterCsv, matchAgentByName,
+             shiftCoversSlot, agentAvailableForSlot, rosterLines, rosterEligibleAgents,
+             buildDefaultRosterGrid, rosterOffShiftIn, matchRosterAgent,
              rosterLoadTotals, rosterData, DEFAULT_ROSTER_SLOTS, ROSTER_DAYS,
              moveLine: window.moveLine,
              lineCheckIn: window.lineCheckIn, lineCheckOut: window.lineCheckOut };
@@ -442,6 +444,143 @@ const C = { agentId: 'a3', agentName: 'Cara', userEmail: 'cara@x.com', linked: t
     check('an exact match still wins over a first-name match', (L.matchAgentByName('Ram') || {}).id === 'r0');
     check('a first name resolves to the full name when unique', (L.matchAgentByName('Narayana') || {}) .id === undefined);
     State.agents = ROSTER_AGENTS;
+
+    console.log('\n27. Shift coverage, including shifts that run past midnight');
+    const NIGHT = { start: '21:00', end: '06:00' };
+    const S = (a, b) => ({ start: a, end: b });
+    check('a night shift covers an evening block', L.shiftCoversSlot(NIGHT, S('21:00', '23:00')) === true);
+    check('a night shift covers a block after midnight', L.shiftCoversSlot(NIGHT, S('01:00', '03:00')) === true);
+    check('a night shift covers the last block', L.shiftCoversSlot(NIGHT, S('05:00', '06:00')) === true);
+    check('a shift ending 03:00 does NOT cover 03:00-05:00', L.shiftCoversSlot(S('21:00', '03:00'), S('03:00', '05:00')) === false);
+    check('a shift ending 03:00 does NOT cover 05:00-06:00', L.shiftCoversSlot(S('21:00', '03:00'), S('05:00', '06:00')) === false);
+    check('a shift ending 03:00 DOES cover 01:00-03:00', L.shiftCoversSlot(S('21:00', '03:00'), S('01:00', '03:00')) === true);
+    check('a morning shift covers only the last block', L.shiftCoversSlot(S('04:00', '14:00'), S('05:00', '06:00')) === true);
+    check('a morning shift does not cover the evening block', L.shiftCoversSlot(S('04:00', '14:00'), S('21:00', '23:00')) === false);
+    check('a day shift 13:00-22:00 does not fully cover 21:00-23:00', L.shiftCoversSlot(S('13:00', '22:00'), S('21:00', '23:00')) === false);
+    check('no shift covers nothing', L.shiftCoversSlot(null, S('21:00', '23:00')) === false);
+
+    console.log('\n28. Auto-assign respects working hours and rosters support only');
+    const SHIFT_LINES = [
+        { id: 'L1', name: 'Line 1', order: 0, isActive: true, inRoster: true },
+        { id: 'L2', name: 'Line 2 / Opsmon', order: 1, isActive: true, inRoster: true },
+        { id: 'L3', name: 'Line 3', order: 2, isActive: true, inRoster: true },
+        { id: 'L9', name: 'Line 9', order: 3, isActive: true, inRoster: false }
+    ];
+    const week = t => Object.fromEntries([1, 2, 3, 4, 5].map(d => [d, t]));
+    const SHIFT_AGENTS = [
+        { id: 's1', name: 'Nightly One', role: 'support', isAvailable: true, shifts: week(NIGHT) },
+        { id: 's2', name: 'Nightly Two', role: 'support', isAvailable: true, shifts: week(NIGHT) },
+        { id: 's3', name: 'Nightly Three', role: 'support', isAvailable: true, shifts: week(NIGHT) },
+        { id: 's4', name: 'Early Finish', role: 'support', isAvailable: true, shifts: week(S('21:00', '03:00')) },
+        { id: 's5', name: 'Morning Only', role: 'support', isAvailable: true, shifts: week(S('04:00', '14:00')) },
+        { id: 'c1', name: 'Some CSE', role: 'cse', isAvailable: true, shifts: week(NIGHT) },
+        { id: 'm1', name: 'A Manager', role: 'management', isAvailable: true, shifts: week(NIGHT) }
+    ];
+    reset(SHIFT_LINES, []);
+    State.agents = SHIFT_AGENTS;
+    State.lineRoster = {};
+    State.currentUser = { role: 'admin', permissions: {} };
+
+    check('only the three flagged lines are rostered',
+        L.rosterLines().map(l => l.name).join(' | ') === 'Line 1 | Line 2 / Opsmon | Line 3',
+        L.rosterLines().map(l => l.name).join(' | '));
+
+    const shiftAuto = L.autoAssignRoster({ scope: 'weekdays', mode: 'replace', pool: 'support', day: 1 });
+    const sIds = L.DEFAULT_ROSTER_SLOTS.map(s => s.id);
+    const byId = id => SHIFT_AGENTS.find(a => a.id === id) || {};
+    let offShift = 0, nonSupport = 0, wrongLine = 0, total = 0;
+    Object.keys(shiftAuto.grid).forEach(d => L.DEFAULT_ROSTER_SLOTS.forEach(slot => {
+        Object.entries(shiftAuto.grid[d][slot.id] || {}).forEach(([lineId, agentId]) => {
+            total++;
+            if (lineId === 'L9') wrongLine++;
+            const a = byId(agentId);
+            if (a.role !== 'support') nonSupport++;
+            if (!L.shiftCoversSlot(a.shifts[d], slot)) offShift++;
+        });
+    }));
+    check('nobody is rostered outside their shift', offShift === 0, String(offShift));
+    check('no CSE or manager is rostered', nonSupport === 0, String(nonSupport));
+    check('no line outside the roster set was touched', wrongLine === 0, String(wrongLine));
+    check('weekdays only (Mon-Fri)', Object.keys(shiftAuto.grid).sort().join(',') === '1,2,3,4,5', Object.keys(shiftAuto.grid).sort().join(','));
+
+    console.log('\n29. Blocks nobody can work are left empty, and reported');
+    // Three night people cover all three lines for every block; the 03:00-05:00 and
+    // 05:00-06:00 blocks exclude Early Finish, and Morning Only can work just 05:00-06:00.
+    const lateSlot = L.DEFAULT_ROSTER_SLOTS[3];   // 03:00-05:00
+    const mondayLate = shiftAuto.grid['1'][lateSlot.id];
+    check('the 03:00-05:00 block never uses the agent who finishes at 03:00',
+        !Object.values(mondayLate).includes('s4'), JSON.stringify(mondayLate));
+    check('the morning-only agent is never on an evening block',
+        !Object.values(shiftAuto.grid['1'][sIds[0]]).includes('s5'));
+    // Only one night person free plus nobody else -> some blocks cannot be covered.
+    State.agents = SHIFT_AGENTS.filter(a => a.id === 's1' || a.id === 's5');
+    State.lineRoster = {};
+    const thinShift = L.autoAssignRoster({ scope: 'day', mode: 'replace', pool: 'support', day: 1 });
+    check('uncovered blocks are counted, not silently filled', thinShift.uncovered > 0, String(thinShift.uncovered));
+    check('and the cells really are empty',
+        Object.keys(thinShift.grid['1'][sIds[0]]).length === 1, JSON.stringify(thinShift.grid['1'][sIds[0]]));
+    State.agents = SHIFT_AGENTS;
+
+    console.log('\n30. The standard rota loads and resolves duplicate first names by shift');
+    // Two people called Ganesh: one on nights, one on a day shift. The rota is a night rota,
+    // so the night one must win -- this is a real case in the team's own roster.
+    State.agents = [
+        { id: 'g1', name: 'Ganesh Ingle', role: 'support', isAvailable: true, shifts: week(NIGHT) },
+        { id: 'g2', name: 'Ganesh Thota', role: 'support', isAvailable: true, shifts: week(S('13:00', '22:00')) },
+        { id: 'a1', name: 'Ram Narayana', role: 'support', isAvailable: true, shifts: week(NIGHT) },
+        { id: 'a2', name: 'Srinath Mandadi', role: 'support', isAvailable: true, shifts: week(NIGHT) },
+        { id: 'a3', name: 'Akash Pandit', role: 'support', isAvailable: true, shifts: week(NIGHT) },
+        { id: 'a4', name: 'Rahul Ramagiri', role: 'support', isAvailable: true, shifts: week(NIGHT) },
+        { id: 'a5', name: 'Ashok Thatikanti', role: 'support', isAvailable: true, shifts: week(NIGHT) },
+        { id: 'a6', name: 'Tarun', role: 'support', isAvailable: true, shifts: week(S('18:00', '03:00')) },
+        { id: 'a7', name: 'Krishna surisetti', role: 'support', isAvailable: true, shifts: week(NIGHT) }
+    ];
+    State.lineRoster = { slots: L.DEFAULT_ROSTER_SLOTS, grid: {} };
+    const std = L.buildDefaultRosterGrid();
+    check('the whole sheet loads (5 days x 5 slots x 3 lines)', std.assigned === 75, String(std.assigned));
+    check('nothing went unmatched', std.unmatched.size === 0, JSON.stringify([...std.unmatched.keys()]));
+    check('"Ganesh" was flagged as ambiguous', std.ambiguous.has('Ganesh'));
+    check('and resolved to the one on nights', std.ambiguous.get('Ganesh').agent.id === 'g1',
+        (std.ambiguous.get('Ganesh') || {}).agent && std.ambiguous.get('Ganesh').agent.name);
+    check('Monday first block matches the sheet',
+        ['L1', 'L2', 'L3'].map(l => std.grid['1'][sIds[0]][l]).join(',') === 'a1,a2,a3',
+        JSON.stringify(std.grid['1'][sIds[0]]));
+    // The source sheet's "Rhul" typo is corrected in the built-in default.
+    check('the sheet typo is corrected, not dropped', std.grid['2'][sIds[3]].L3 === 'a4',
+        JSON.stringify(std.grid['2'][sIds[3]]));
+    State.lineRoster = { slots: L.DEFAULT_ROSTER_SLOTS, grid: std.grid };
+    check('the loaded rota has nobody outside their hours', L.rosterOffShiftIn(std.grid).length === 0,
+        JSON.stringify(L.rosterOffShiftIn(std.grid).slice(0, 3)));
+
+    console.log('\n31. Roster line selection');
+    reset([
+        { id: 'A', name: 'Line 1', order: 0, isActive: true },
+        { id: 'B', name: 'Line 2 / Opsmon', order: 1, isActive: true },
+        { id: 'C', name: 'Line 3', order: 2, isActive: true },
+        { id: 'D', name: 'Escalations', order: 3, isActive: true }
+    ], []);
+    check('with nothing set, the Line 1/2/3 names are picked',
+        L.rosterLines().map(l => l.id).join(',') === 'A,B,C', L.rosterLines().map(l => l.id).join(','));
+    State.lines = [
+        { id: 'A', name: 'Alpha', order: 0, isActive: true },
+        { id: 'B', name: 'Bravo', order: 1, isActive: true },
+        { id: 'C', name: 'Charlie', order: 2, isActive: true },
+        { id: 'D', name: 'Delta', order: 3, isActive: true }
+    ];
+    check('with no matching names, the first three are used',
+        L.rosterLines().map(l => l.id).join(',') === 'A,B,C');
+    State.lines = [
+        { id: 'A', name: 'Alpha', order: 0, isActive: true, inRoster: false },
+        { id: 'B', name: 'Bravo', order: 1, isActive: true, inRoster: true },
+        { id: 'C', name: 'Charlie', order: 2, isActive: true, inRoster: false }
+    ];
+    check('an explicit choice wins over any default', L.rosterLines().map(l => l.id).join(',') === 'B');
+
+    console.log('\n32. An agent with no shifts recorded is not locked out');
+    check('no shifts at all means unconstrained',
+        L.agentAvailableForSlot({ id: 'x', shifts: {} }, 1, S('21:00', '23:00')) === true);
+    check('but a shift on another day still blocks this one',
+        L.agentAvailableForSlot({ id: 'x', shifts: { 2: NIGHT } }, 1, S('21:00', '23:00')) === false);
     console.log(`\n${pass} passed, ${fail} failed\n`);
     process.exit(fail === 0 ? 0 : 1);
 })();

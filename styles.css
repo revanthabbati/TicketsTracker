@@ -318,6 +318,11 @@ hr.divider { border: 0; border-top: 1px solid var(--border-light); margin: 1.5re
 .roster-import-warn ul { margin: 0.5rem 0 0.5rem 1.2rem; }
 .roster-import-ok { background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: var(--radius-md); padding: 0.85rem 1rem; font-size: 0.85rem; }
 
+/* An assignment outside that person's working hours: flagged, never blocked, since a
+   supervisor may knowingly put somebody on outside their usual shift. */
+.roster-cell.off-shift { border-color: rgba(245, 158, 11, 0.6); }
+.roster-cell-off { background: rgba(245, 158, 11, 0.06); }
+.roster-off-flag { display: inline-block; margin-top: 0.3rem; font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.04em; color: #f59e0b; font-weight: 700; }
 /* --- RESPONSIVE / MOBILE ---
    The app was built desktop-only: a fixed 260px sidebar, body{overflow:hidden}, two-column
    grids and wide tables with no horizontal escape. On a 375px phone the sidebar alone ate

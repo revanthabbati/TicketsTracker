@@ -751,6 +751,7 @@
                                                 <th>Line</th>
                                                 <th>Order</th>
                                                 <th>Occupancy</th>
+                                                <th title="Included in the call assignment roster">Roster</th>
                                                 <th>Status</th>
                                                 <th style="text-align: right;">Actions</th>
                                             </tr>
@@ -769,6 +770,7 @@
                                 <h2>Call Assignment Roster</h2>
                                 <div class="data-controls" style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap; margin-left:auto;">
                                     <select id="roster-day-select" class="input-control" style="width:auto; padding:0.4rem 0.7rem; font-size:0.8rem;"></select>
+                                    <button class="btn btn-primary perm-manage-lines" id="btn-roster-default" style="padding: 0.4rem 1rem; font-size: 0.8rem;">Load standard rota</button>
                                     <button class="btn btn-purple perm-manage-lines" id="btn-roster-auto" style="padding: 0.4rem 1rem; font-size: 0.8rem;">Auto-assign</button>
                                     <button class="btn btn-outline perm-manage-lines" id="btn-roster-slots" style="padding: 0.4rem 1rem; font-size: 0.8rem;">Time Slots</button>
                                     <button class="btn btn-outline perm-manage-lines" id="btn-roster-import" style="padding: 0.4rem 1rem; font-size: 0.8rem;">Import CSV</button>
@@ -1237,13 +1239,14 @@
     <div id="modal-roster-auto" class="modal-overlay">
         <div class="modal-content">
             <h2 style="font-size: 1.4rem; font-weight: 700; margin-bottom: 0.5rem;">Auto-assign the Roster</h2>
-            <p style="color: var(--text-muted); margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.5;">Fills the roster by giving each shift to whoever has the fewest hours so far, never putting the same person on two lines at once, and avoiding back-to-back slots where there are enough people to do so.</p>
+            <p style="color: var(--text-muted); margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.5;">Fills the roster by giving each block to whoever has the fewest hours so far, never putting the same person on two lines at once, and avoiding back-to-back blocks where there are enough people to do so. Only <strong>support agents whose shift covers the block</strong> are considered &mdash; anything nobody is on shift for is left empty rather than filled with someone who won't be there.</p>
             <form id="form-roster-auto">
                 <div class="input-group">
                     <label>Cover</label>
                     <select id="roster-auto-scope" class="input-control">
+                        <option value="weekdays" selected>Monday to Friday</option>
+                        <option value="week">All seven days</option>
                         <option value="day">The day currently shown</option>
-                        <option value="week" selected>The whole week</option>
                     </select>
                 </div>
                 <div class="input-group">
@@ -1256,9 +1259,8 @@
                 <div class="input-group">
                     <label>Who to roster</label>
                     <select id="roster-auto-pool" class="input-control">
-                        <option value="available" selected>Support agents currently on the floor</option>
-                        <option value="support">All support agents</option>
-                        <option value="all">Every agent</option>
+                        <option value="support" selected>All support agents</option>
+                        <option value="available">Only those currently on the floor</option>
                     </select>
                     <span class="input-hint" id="roster-auto-pool-hint"></span>
                 </div>
@@ -1995,6 +1997,7 @@
             rosterLoadSummary: document.getElementById('roster-load-summary'),
             tableRosterLoad: document.getElementById('table-roster-load'),
             btnRosterAuto: document.getElementById('btn-roster-auto'),
+            btnRosterDefault: document.getElementById('btn-roster-default'),
             btnRosterSlots: document.getElementById('btn-roster-slots'),
             btnRosterImport: document.getElementById('btn-roster-import'),
             rosterImportFile: document.getElementById('roster-import-file'),
@@ -2435,6 +2438,7 @@
             // Call roster
             UI.rosterDaySelect.addEventListener('change', renderRoster);
             UI.btnRosterAuto.addEventListener('click', window.openRosterAutoModal);
+            UI.btnRosterDefault.addEventListener('click', window.loadDefaultRoster);
             UI.btnRosterSlots.addEventListener('click', window.openRosterSlotsModal);
             UI.btnRosterImport.addEventListener('click', () => UI.rosterImportFile.click());
             UI.rosterImportFile.addEventListener('change', handleRosterImportFile);
@@ -7287,6 +7291,27 @@ Exported ${escapeHtml(formatZendeskTimestampWithYear(new Date().toISOString()))}
             notify(`${movedName} moved ${direction}.`);
         };
 
+        // Which lines the call roster covers. Stored explicitly so it survives renames and
+        // reordering, rather than being inferred from position every time.
+        window.toggleLineInRoster = async function(id) {
+            if (!canManageLines()) return notify('You do not have permission to change lines.');
+            const currently = rosterLines().some(l => l.id === id);
+            let label = '';
+            const ok = await mutateDocArray('lines', lines => {
+                const target = lines.find(l => l.id === id);
+                if (!target) return null;
+                label = target.name || '';
+                // First time anyone touches this, the implicit default is written out for
+                // every line, so the set is explicit from then on and can't shift under them.
+                const implicit = new Set(rosterLines().map(l => l.id));
+                lines.forEach(l => { l.inRoster = l.id === id ? !currently : implicit.has(l.id); });
+                return lines;
+            });
+            if (!ok) return;
+            renderLinesView();
+            notify(`${label} ${currently ? 'removed from' : 'added to'} the call roster.`);
+        };
+
         window.toggleLineActive = async function(id) {
             if (!canManageLines()) return notify('You do not have permission to change lines.');
             let label = '';
@@ -7592,14 +7617,16 @@ Exported ${escapeHtml(formatZendeskTimestampWithYear(new Date().toISOString()))}
             const open = openLineSessions();
 
             if (lines.length === 0) {
-                UI.tableLines.innerHTML = `<tr><td colspan="5" style="text-align:center; color: var(--text-muted); padding: 2rem;">No lines created yet.</td></tr>`;
+                UI.tableLines.innerHTML = `<tr><td colspan="6" style="text-align:center; color: var(--text-muted); padding: 2rem;">No lines created yet.</td></tr>`;
                 return;
             }
 
+            const rosterIds = new Set(rosterLines().map(l => l.id));
             UI.tableLines.innerHTML = lines.map((line, idx) => {
                 const used = open.filter(s => s.lineId === line.id).length;
                 const closed = line.isActive === false;
                 const onDash = idx < dashboardLineCount();
+                const onRoster = rosterIds.has(line.id);
                 return `<tr${onDash ? ' class="line-on-dash"' : ''}>
                     <td>
                         <strong>${escapeHtml(line.name)}</strong>
@@ -7611,6 +7638,12 @@ Exported ${escapeHtml(formatZendeskTimestampWithYear(new Date().toISOString()))}
                         <button class="btn-icon" title="Move down"${idx === lines.length - 1 ? ' disabled' : ''} onclick="window.moveLine('${escapeHtml(line.id)}', 'down')"><svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg></button>
                     </td>
                     <td>${used}${line.capacity ? ` / ${line.capacity}` : ' <span style="color: var(--text-muted); font-size:0.78rem;">(unlimited)</span>'}</td>
+                    <td>
+                        <label class="switch" title="${onRoster ? 'On the call roster' : 'Not on the call roster'}">
+                            <input type="checkbox" ${onRoster ? 'checked' : ''} onchange="window.toggleLineInRoster('${escapeHtml(line.id)}')">
+                            <span class="slider"></span>
+                        </label>
+                    </td>
                     <td><span class="badge" style="${closed ? 'color:#f43f5e; background:rgba(244,63,94,0.15);' : 'color:#10b981; background:rgba(16,185,129,0.15);'}">${closed ? 'Closed' : 'Open'}</span></td>
                     <td style="text-align: right; white-space: nowrap;">
                         <button class="btn-icon" title="Edit line" onclick="window.openEditLineModal('${escapeHtml(line.id)}')"><svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg></button>
@@ -7859,6 +7892,166 @@ Exported ${escapeHtml(formatZendeskTimestampWithYear(new Date().toISOString()))}
             });
         }
 
+
+        /* --- Which lines the roster covers ---
+           Calls run on three lines (Line 1, Line 2 / Opsmon, Line 3) even though more lines
+           exist for other purposes, so the roster is explicitly a subset. `inRoster` on the
+           line record is the switch, set in Manage Lines. When nobody has set it yet the
+           default is worked out by name, falling back to the first three in order -- so an
+           existing install gets the right three without anyone configuring anything. */
+
+        const ROSTER_LINE_NAME_HINTS = [/^line\s*1\b/i, /^line\s*2\b/i, /^line\s*3\b/i];
+
+        function rosterLines() {
+            const all = sortedLines();
+            const explicit = all.filter(l => l.inRoster === true);
+            if (explicit.length > 0) return explicit;
+            // Nobody has chosen yet: anything explicitly switched off stays off, then match
+            // the usual names, then simply take the first three.
+            const candidates = all.filter(l => l.inRoster !== false);
+            const byName = candidates.filter(l => ROSTER_LINE_NAME_HINTS.some(re => re.test((l.name || '').trim())));
+            if (byName.length > 0) return byName;
+            return candidates.slice(0, 3);
+        }
+
+        /* --- Shift awareness ---
+           The rota has to respect when people actually work. Most of the team is on
+           21:00-06:00, but several are not (Suman finishes at 03:00, Tarun at 03:00,
+           Sriharsha starts at 04:00), and rostering somebody onto a line they will not be
+           at is worse than leaving the slot visibly empty. */
+
+        function agentShiftForDay(agent, dayIdx) {
+            if (!agent || !agent.shifts) return null;
+            const s = agent.shifts[dayIdx] || agent.shifts[String(dayIdx)];
+            return s && s.start && s.end ? s : null;
+        }
+
+        function toMinutes(hhmm) {
+            const [h, m] = String(hhmm || '0:0').split(':').map(Number);
+            return (h || 0) * 60 + (m || 0);
+        }
+
+        // Both shifts and slots routinely run past midnight, so everything is unrolled onto a
+        // 0..2879 minute line (today plus tomorrow) and compared there. Much easier to reason
+        // about than juggling wrap-around cases at every comparison.
+        function spanMinutes(start, end) {
+            const s = toMinutes(start);
+            let e = toMinutes(end);
+            if (e <= s) e += 24 * 60;
+            return { start: s, end: e };
+        }
+
+        // Full containment, not mere overlap: a line handed to somebody who logs off halfway
+        // through the block is not covered.
+        function shiftCoversSlot(shift, slot) {
+            if (!shift) return false;
+            const sh = spanMinutes(shift.start, shift.end);
+            const sl = spanMinutes(slot.start, slot.end);
+            if (sl.start >= sh.start && sl.end <= sh.end) return true;
+            // The slot may sit in the same clock window but be expressed a day later
+            // (a 01:00-03:00 slot against a 21:00-06:00 shift, for instance).
+            const shifted = { start: sl.start + 24 * 60, end: sl.end + 24 * 60 };
+            return shifted.start >= sh.start && shifted.end <= sh.end;
+        }
+
+        function agentAvailableForSlot(agent, dayIdx, slot) {
+            // An agent with no shifts recorded at all is treated as unconstrained rather than
+            // unusable -- otherwise a half-filled Shift Timings tab would empty the rota.
+            if (!agent || !agent.shifts || Object.keys(agent.shifts).length === 0) return true;
+            return shiftCoversSlot(agentShiftForDay(agent, dayIdx), slot);
+        }
+
+        // Calls are taken by support only; CSE, CSM and management are never rostered.
+        function rosterEligibleAgents() {
+            return (State.agents || []).filter(a => a.role === 'support');
+        }
+
+        /* --- The team's standard rota, as supplied in their sheet ---
+           Rows are in slot order, columns in roster-line order. Kept as names because agent
+           ids differ per install; they are matched against the live roster when loaded, and
+           anything that doesn't match is reported rather than guessed at.
+
+           Tuesday 3-to-5 Line 3 reads "Rhul" in the source sheet, which is a typo for Rahul
+           and is corrected here. */
+        const DEFAULT_ROSTER_SHEET = {
+            1: [['Ram', 'Srinath', 'Akash'], ['Rahul', 'Ganesh', 'Ashok'], ['Srinath', 'Ram', 'Tarun'], ['Akash', 'Krishna', 'Ganesh'], ['Ram', 'Srinath', 'Rahul']],
+            2: [['Ram', 'Tarun', 'Rahul'], ['Akash', 'Krishna', 'Ashok'], ['Ganesh', 'Ram', 'Tarun'], ['Krishna', 'Ashok', 'Rahul'], ['Ganesh', 'Akash', 'Ram']],
+            3: [['Ashok', 'Akash', 'Tarun'], ['Rahul', 'Krishna', 'Ganesh'], ['Tarun', 'Ashok', 'Akash'], ['Krishna', 'Ganesh', 'Rahul'], ['Akash', 'Rahul', 'Ashok']],
+            4: [['Tarun', 'Krishna', 'Ganesh'], ['Srinath', 'Rahul', 'Krishna'], ['Ganesh', 'Tarun', 'Ashok'], ['Ashok', 'Srinath', 'Rahul'], ['Krishna', 'Ganesh', 'Srinath']],
+            5: [['Akash', 'Tarun', 'Krishna'], ['Ganesh', 'Srinath', 'Rahul'], ['Ashok', 'Krishna', 'Rahul'], ['Srinath', 'Akash', 'Ganesh'], ['Krishna', 'Ashok', 'Akash']]
+        };
+
+        function buildDefaultRosterGrid() {
+            const { slots } = rosterData();
+            const lines = rosterLines();
+            const grid = {};
+            const unmatched = new Map();
+            const ambiguous = new Map();
+            let assigned = 0;
+
+            Object.keys(DEFAULT_ROSTER_SHEET).forEach(dayKey => {
+                DEFAULT_ROSTER_SHEET[dayKey].forEach((row, slotIndex) => {
+                    const slot = slots[slotIndex];
+                    if (!slot) return;
+                    row.forEach((name, lineIndex) => {
+                        const line = lines[lineIndex];
+                        if (!line || !name) return;
+                        const match = matchRosterAgent(name, Number(dayKey), slot);
+                        if (!match.agent) { unmatched.set(name, (unmatched.get(name) || 0) + 1); return; }
+                        if (match.ambiguousWith) ambiguous.set(name, match);
+                        grid[dayKey] = grid[dayKey] || {};
+                        grid[dayKey][slot.id] = grid[dayKey][slot.id] || {};
+                        grid[dayKey][slot.id][line.id] = match.agent.id;
+                        assigned++;
+                    });
+                });
+            });
+            return { grid, assigned, unmatched, ambiguous, days: Object.keys(grid).length };
+        }
+
+        // The sheet uses first names, and this team has two people called Ganesh. Where a
+        // first name matches more than one agent, the one actually on shift for that slot
+        // wins -- which is the same judgement a human would make, and it is reported so the
+        // choice is visible rather than silent.
+        function matchRosterAgent(rawName, dayIdx, slot) {
+            const name = String(rawName || '').trim();
+            if (!name) return { agent: null };
+            const lower = name.toLowerCase();
+            const pool = rosterEligibleAgents();
+
+            const exact = pool.filter(a => (a.name || '').trim().toLowerCase() === lower);
+            if (exact.length === 1) return { agent: exact[0] };
+
+            const byFirst = pool.filter(a => (a.name || '').trim().toLowerCase().split(/\s+/)[0] === lower);
+            if (byFirst.length === 1) return { agent: byFirst[0] };
+            if (byFirst.length > 1) {
+                const onShift = slot ? byFirst.filter(a => agentAvailableForSlot(a, dayIdx, slot)) : [];
+                if (onShift.length === 1) {
+                    return { agent: onShift[0], ambiguousWith: byFirst.map(a => a.name), reason: 'on shift for that slot' };
+                }
+                return { agent: byFirst[0], ambiguousWith: byFirst.map(a => a.name), reason: 'first on the roster' };
+            }
+
+            const starts = pool.filter(a => (a.name || '').trim().toLowerCase().startsWith(lower + ' '));
+            if (starts.length === 1) return { agent: starts[0] };
+            if (starts.length > 1) return { agent: starts[0], ambiguousWith: starts.map(a => a.name), reason: 'first on the roster' };
+
+            return { agent: null };
+        }
+
+        window.loadDefaultRoster = async function() {
+            if (!canManageLines()) return notify('You do not have permission to edit the roster.');
+            const built = buildDefaultRosterGrid();
+            if (built.assigned === 0) {
+                return notify('None of the names in the standard rota match a support agent here. Check the Agents tab.');
+            }
+            pendingRosterImport = {
+                grid: built.grid, assigned: built.assigned, days: built.days,
+                unmatched: built.unmatched, unknownSlots: new Set(), ambiguous: built.ambiguous,
+                source: 'the standard rota'
+            };
+            showRosterImportReport();
+        };
         /* --- Manual editing --- */
 
         window.setRosterCell = async function(day, slotId, lineId, agentId) {
@@ -7976,23 +8169,25 @@ Exported ${escapeHtml(formatZendeskTimestampWithYear(new Date().toISOString()))}
            is big enough to allow it, and then by who was used least recently. Deterministic,
            so pressing Generate twice on the same inputs gives the same rota. */
 
+        // Support only, always: CSE, CSM and management do not take calls, so they are never
+        // in the pool regardless of which option is chosen.
         function rosterAgentPool(mode) {
-            const agents = State.agents || [];
-            if (mode === 'all') return agents.slice();
-            const support = agents.filter(a => a.role === 'support');
+            const support = rosterEligibleAgents();
             if (mode === 'support') return support;
             return support.filter(a => a.isAvailable !== false);
         }
 
         function autoAssignRoster(options) {
             const { slots, grid } = rosterData();
-            const lines = sortedLines().filter(l => l.isActive !== false);
+            const lines = rosterLines().filter(l => l.isActive !== false);
             const pool = rosterAgentPool(options.pool);
             if (pool.length === 0 || lines.length === 0 || slots.length === 0) {
                 return { grid: null, reason: !pool.length ? 'No agents match that selection.' : 'Set up at least one line and one time slot first.' };
             }
 
-            const days = options.scope === 'day' ? [options.day] : ROSTER_DAYS.map(d => d.idx);
+            const days = options.scope === 'day' ? [options.day]
+                : options.scope === 'weekdays' ? [1, 2, 3, 4, 5]
+                : ROSTER_DAYS.map(d => d.idx);
             const next = JSON.parse(JSON.stringify(grid));
 
             const hours = new Map(pool.map(a => [a.id, 0]));
@@ -8014,6 +8209,7 @@ Exported ${escapeHtml(formatZendeskTimestampWithYear(new Date().toISOString()))}
 
             let tick = 0;
             let filled = 0;
+            let uncovered = 0;
             days.forEach(day => {
                 const dayKey = String(day);
                 next[dayKey] = next[dayKey] || {};
@@ -8031,6 +8227,9 @@ Exported ${escapeHtml(formatZendeskTimestampWithYear(new Date().toISOString()))}
 
                         const candidates = pool
                             .filter(a => !takenThisSlot.has(a.id))
+                            // Only people whose shift actually covers this block. Somebody who
+                            // logs off at 03:00 is not an option for the 03:00-05:00 slot.
+                            .filter(a => agentAvailableForSlot(a, day, slot))
                             .sort((a, b) => {
                                 const ha = hours.get(a.id), hb = hours.get(b.id);
                                 if (ha !== hb) return ha - hb;
@@ -8040,9 +8239,9 @@ Exported ${escapeHtml(formatZendeskTimestampWithYear(new Date().toISOString()))}
                                 return lastUsed.get(a.id) - lastUsed.get(b.id);
                             });
 
-                        // Fewer people than lines in this slot -- leave it empty rather than
-                        // double-booking somebody, and let the UI show the gap.
-                        if (candidates.length === 0) { delete cell[line.id]; return; }
+                        // Nobody on shift and free for this block -- leave it visibly empty
+                        // rather than double-booking somebody or rostering them off-shift.
+                        if (candidates.length === 0) { delete cell[line.id]; uncovered++; return; }
 
                         const pick = candidates[0];
                         cell[line.id] = pick.id;
@@ -8054,7 +8253,7 @@ Exported ${escapeHtml(formatZendeskTimestampWithYear(new Date().toISOString()))}
                 });
             });
 
-            return { grid: next, filled, poolSize: pool.length };
+            return { grid: next, filled, uncovered, poolSize: pool.length };
         }
 
         window.openRosterAutoModal = function() {
@@ -8065,12 +8264,11 @@ Exported ${escapeHtml(formatZendeskTimestampWithYear(new Date().toISOString()))}
 
         function updateRosterPoolHint() {
             const pool = rosterAgentPool(UI.rosterAutoPool.value);
-            const lines = sortedLines().filter(l => l.isActive !== false).length;
-            const { slots } = rosterData();
+            const lines = rosterLines().filter(l => l.isActive !== false).length;
             UI.rosterAutoPoolHint.innerText = pool.length === 0
-                ? 'Nobody matches that selection.'
-                : `${pool.length} agent(s): ${pool.map(a => a.name).join(', ')}`
-                  + (lines > pool.length ? ` — fewer people than the ${lines} open lines, so some slots will be left empty.` : '');
+                ? 'No support agents match that selection.'
+                : `${pool.length} support agent(s): ${pool.map(a => a.name).join(', ')}`
+                  + (lines > pool.length ? ` — fewer people than the ${lines} rostered lines, so some blocks will be left empty.` : '');
         }
 
         async function submitRosterAuto(e) {
@@ -8089,11 +8287,16 @@ Exported ${escapeHtml(formatZendeskTimestampWithYear(new Date().toISOString()))}
             const ok = await saveRoster(r => { r.grid = result.grid; return r; });
             if (!ok) return;
 
-            logActivity('Call Lines', `The call roster was auto-assigned (${escapeHtml(options.scope === 'day' ? 'one day' : 'whole week')}, ${escapeHtml(options.mode === 'fill' ? 'gaps only' : 'replaced')}, ${result.poolSize} agent(s))`);
+            const scopeLabel = { day: 'one day', weekdays: 'Mon-Fri', week: 'all seven days' }[options.scope] || options.scope;
+            logActivity('Call Lines', `The call roster was auto-assigned (${escapeHtml(scopeLabel)}, ${escapeHtml(options.mode === 'fill' ? 'gaps only' : 'replaced')}, ${result.poolSize} agent(s))`);
             State.commit(['activities']);
             window.closeModals();
             renderRoster();
-            notify(`Roster generated — ${result.filled} shift(s) assigned.`);
+            // Uncovered blocks are reported rather than hidden: they mean nobody's shift
+            // reaches that hour, which is a staffing fact the roster shouldn't paper over.
+            notify(result.uncovered
+                ? `Roster generated — ${result.filled} shift(s) assigned, ${result.uncovered} left empty with nobody on shift.`
+                : `Roster generated — ${result.filled} shift(s) assigned.`);
         }
 
         /* --- Roster rendering --- */
@@ -8131,16 +8334,18 @@ Exported ${escapeHtml(formatZendeskTimestampWithYear(new Date().toISOString()))}
 
         function renderRosterDayTable(day) {
             const { slots } = rosterData();
-            const lines = sortedLines();
+            const lines = rosterLines();
             const dayMeta = ROSTER_DAYS.find(d => d.idx === day) || { name: 'Day' };
             const editable = canManageLines();
             const isToday = day === currentRosterDay();
             const nowSlot = isToday ? currentRosterSlot() : null;
 
             if (lines.length === 0) {
-                return `<div class="panel"><div class="panel-body" style="color:var(--text-muted);">No call lines yet — create them in Manage Lines and they become the roster's columns.</div></div>`;
+                return `<div class="panel"><div class="panel-body" style="color:var(--text-muted);">No lines are marked for the roster — switch them on in Manage Lines.</div></div>`;
             }
 
+            // Support agents, plus anyone already on this day's rota. Someone who has since
+            // moved off support must stay selectable, or opening the day would blank them.
             const pool = State.agents.filter(a => a.role === 'support' || rosterDayUsesAgent(day, a.id));
 
             const rows = slots.map(slot => {
@@ -8154,13 +8359,21 @@ Exported ${escapeHtml(formatZendeskTimestampWithYear(new Date().toISOString()))}
                     <td style="white-space:nowrap; color:var(--text-muted);">${rosterSlotHours(slot)}h</td>
                     ${lines.map(line => {
                         const agentId = rosterAssignment(day, slot.id, line.id);
-                        return `<td>${editable
-                            ? `<select class="roster-cell" onchange="window.setRosterCell(${day}, '${escapeHtml(slot.id)}', '${escapeHtml(line.id)}', this.value)">
+                        const assigned = agentId ? State.agents.find(a => a.id === agentId) : null;
+                        // Flagged, not blocked: an admin may deliberately put somebody on
+                        // outside their usual hours, but they should see that they have.
+                        const offShift = assigned && !agentAvailableForSlot(assigned, day, slot);
+                        const onShift = pool.filter(a => agentAvailableForSlot(a, day, slot));
+                        const offShiftPool = pool.filter(a => !agentAvailableForSlot(a, day, slot));
+                        const opt = a => `<option value="${escapeHtml(a.id)}"${a.id === agentId ? ' selected' : ''}>${escapeHtml(a.name)}</option>`;
+                        return `<td class="${offShift ? 'roster-cell-off' : ''}">${editable
+                            ? `<select class="roster-cell${offShift ? ' off-shift' : ''}" onchange="window.setRosterCell(${day}, '${escapeHtml(slot.id)}', '${escapeHtml(line.id)}', this.value)">
                                     <option value="">—</option>
-                                    ${pool.map(a => `<option value="${escapeHtml(a.id)}"${a.id === agentId ? ' selected' : ''}>${escapeHtml(a.name)}</option>`).join('')}
+                                    ${onShift.length ? `<optgroup label="On shift">${onShift.map(opt).join('')}</optgroup>` : ''}
+                                    ${offShiftPool.length ? `<optgroup label="Not on shift for this block">${offShiftPool.map(opt).join('')}</optgroup>` : ''}
                                </select>`
                             : `<span class="${agentId ? '' : 'roster-empty'}">${agentId ? escapeHtml(agentNameById(agentId)) : 'Unassigned'}</span>`
-                        }</td>`;
+                        }${offShift ? `<span class="roster-off-flag" title="${escapeHtml(agentNameById(agentId))} is not on shift for ${escapeHtml(slot.start)}–${escapeHtml(slot.end)} on ${escapeHtml(dayMeta.name)}">off shift</span>` : ''}</td>`;
                     }).join('')}
                 </tr>`;
             }).join('');
@@ -8196,7 +8409,7 @@ Exported ${escapeHtml(formatZendeskTimestampWithYear(new Date().toISOString()))}
             if (!UI.rosterNowStrip) return;
             const slot = currentRosterSlot();
             const day = currentRosterDay();
-            const lines = sortedLines();
+            const lines = rosterLines();
 
             if (!slot) {
                 UI.rosterNowStrip.innerHTML = `<span style="color:var(--text-muted); font-size:0.9rem;">Outside the rostered hours right now.</span>`;
@@ -8265,7 +8478,9 @@ Exported ${escapeHtml(formatZendeskTimestampWithYear(new Date().toISOString()))}
             // The spread between the busiest and quietest person is the number that tells you
             // whether the rota is actually fair, so it is stated rather than left to be eyeballed.
             const spread = rows[0][1].hours - rows[rows.length - 1][1].hours;
-            UI.rosterLoadSummary.innerText = `${rows.length} agent(s) · ${total}h rostered · ${spread === 0 ? 'evenly split' : `${spread}h between busiest and quietest`}`;
+            const offShift = rosterOffShiftIn(rosterData().grid).length;
+            UI.rosterLoadSummary.innerText = `${rows.length} agent(s) · ${total}h rostered · ${spread === 0 ? 'evenly split' : `${spread}h between busiest and quietest`}`
+                + (offShift ? ` · ${offShift} outside working hours` : '');
 
             UI.tableRosterLoad.innerHTML = rows.map(([agentId, r]) => `<tr>
                 <td><strong>${escapeHtml(agentNameById(agentId))}</strong></td>
@@ -8315,7 +8530,7 @@ Exported ${escapeHtml(formatZendeskTimestampWithYear(new Date().toISOString()))}
         function parseRosterCsv(text) {
             const rows = parseCsvRows(text);
             const { slots } = rosterData();
-            const lines = sortedLines();
+            const lines = rosterLines();
             const dayByName = new Map(ROSTER_DAYS.map(d => [d.name.toLowerCase(), d.idx]));
 
             const grid = {};
@@ -8380,9 +8595,25 @@ Exported ${escapeHtml(formatZendeskTimestampWithYear(new Date().toISOString()))}
 
         function showRosterImportReport() {
             const r = pendingRosterImport;
-            UI.rosterImportSummary.innerText = `${r.assigned} shift(s) across ${r.days} day(s) were read from the file. Nothing is saved until you apply it.`;
+            UI.rosterImportSummary.innerText = `${r.assigned} shift(s) across ${r.days} day(s) were read from ${r.source || 'the file'}. Nothing is saved until you apply it.`;
 
             const problems = [];
+
+            // Where a first name matched more than one agent, say which one was picked and
+            // why -- a silent guess about who is on the phones is not good enough.
+            if (r.ambiguous && r.ambiguous.size > 0) {
+                problems.push(`<div class="roster-import-warn"><strong>${r.ambiguous.size} first name(s) matched more than one agent.</strong> The rota uses first names, so these were resolved for you:
+                    <ul>${[...r.ambiguous.entries()].map(([name, m]) => `<li><strong>${escapeHtml(name)}</strong> → ${escapeHtml(m.agent.name)} <span style="color:var(--text-muted);">— ${escapeHtml(m.reason)}; also matched ${escapeHtml(m.ambiguousWith.filter(n => n !== m.agent.name).join(', '))}</span></li>`).join('')}</ul>
+                    Correct any of these in the grid after applying.</div>`);
+            }
+
+            // Assignments that land outside somebody's shift are worth surfacing before they
+            // are saved, since the whole point of the rota is that people are actually there.
+            const offShift = rosterOffShiftIn(r.grid);
+            if (offShift.length > 0) {
+                problems.push(`<div class="roster-import-warn"><strong>${offShift.length} shift(s) fall outside that person's working hours.</strong> They will still be saved &mdash; the roster flags them rather than refusing &mdash; but check Shift Timings if this looks wrong:
+                    <ul>${offShift.slice(0, 8).map(o => `<li>${escapeHtml(o.day)} ${escapeHtml(o.slot)} — ${escapeHtml(o.agent)} <span style="color:var(--text-muted);">(${escapeHtml(o.shift)})</span></li>`).join('')}${offShift.length > 8 ? `<li>…and ${offShift.length - 8} more</li>` : ''}</ul></div>`);
+            }
             if (r.unmatched.size > 0) {
                 problems.push(`<div class="roster-import-warn"><strong>${r.unmatched.size} name(s) didn't match anyone on the agent roster</strong> and will be left unassigned:
                     <ul>${[...r.unmatched.entries()].map(([name, n]) => `<li>${escapeHtml(name)} <span style="color:var(--text-muted);">— ${n} shift(s)</span></li>`).join('')}</ul>
@@ -8398,6 +8629,30 @@ Exported ${escapeHtml(formatZendeskTimestampWithYear(new Date().toISOString()))}
             UI.rosterImportReport.innerHTML = problems.join('') || `<div class="roster-import-ok">Everything in the file matched an agent and a time slot.</div>`;
             UI.btnRosterImportApply.disabled = r.assigned === 0;
             UI.modalRosterImport.classList.add('active');
+        }
+
+        // Every assignment in a grid where the person's shift doesn't cover the block. Used
+        // both to warn before an import lands and to summarise the live rota.
+        function rosterOffShiftIn(grid) {
+            const { slots } = rosterData();
+            const out = [];
+            Object.keys(grid || {}).forEach(dayKey => {
+                const day = Number(dayKey);
+                const dayName = (ROSTER_DAYS.find(d => d.idx === day) || {}).name || dayKey;
+                slots.forEach(slot => {
+                    const cell = (grid[dayKey] || {})[slot.id] || {};
+                    Object.values(cell).forEach(agentId => {
+                        const agent = State.agents.find(a => a.id === agentId);
+                        if (!agent || agentAvailableForSlot(agent, day, slot)) return;
+                        const shift = agentShiftForDay(agent, day);
+                        out.push({
+                            day: dayName, slot: slot.label, agent: agent.name,
+                            shift: shift ? `works ${shift.start}–${shift.end}` : 'no shift set for that day'
+                        });
+                    });
+                });
+            });
+            return out;
         }
 
         async function applyRosterImport() {
@@ -8422,7 +8677,7 @@ Exported ${escapeHtml(formatZendeskTimestampWithYear(new Date().toISOString()))}
 
         function rosterExportRows() {
             const { slots } = rosterData();
-            const lines = sortedLines();
+            const lines = rosterLines();
             const rows = [];
             ROSTER_DAYS.forEach(d => {
                 slots.forEach(slot => {
@@ -8436,7 +8691,7 @@ Exported ${escapeHtml(formatZendeskTimestampWithYear(new Date().toISOString()))}
         }
 
         function rosterExportHeaders() {
-            return ['Day', 'Slot', 'Time', 'Hours', ...sortedLines().map(l => l.name)];
+            return ['Day', 'Slot', 'Time', 'Hours', ...rosterLines().map(l => l.name)];
         }
 
         function exportRosterCsv() {

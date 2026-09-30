@@ -71,7 +71,7 @@ clicking through the app because they need two people acting at once.
 node tools/lines-check.js
 ```
 
-Runs 112 assertions covering:
+Runs 143 assertions covering:
 
 - **seat capacity under a race** — two agents taking the last seat at the same instant, with a
   second client deliberately committing mid-transaction. A line must never exceed its capacity.
@@ -100,6 +100,12 @@ Runs 112 assertions covering:
   lines leaves slots empty rather than double-booking; that fill-gaps changes nothing existing;
   and that importing the team's spreadsheet reproduces it exactly, reports unmatched names
   rather than dropping them, and leaves days absent from the file untouched.
+- **roster constraints** — that shift coverage is computed correctly across midnight (a shift
+  ending 03:00 must not cover the 03:00–05:00 block); that auto-assign rosters **support agents
+  only**, never outside someone's working hours, and only onto the lines flagged for the roster;
+  that blocks nobody is on shift for are left empty and counted rather than filled; and that
+  loading the standard rota resolves a duplicate first name (two people called Ganesh) to
+  whichever one is actually on shift.
 - that writes touch **only** the fields they should and leave `users` and `tickets`
   byte-identical.
 
