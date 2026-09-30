@@ -325,7 +325,7 @@ async function loadCalls(force) {
     callMessage('Loading…');
     try {
         const state = await fetchState();
-        callState = { lines: state.lines || [], lineSessions: state.lineSessions || [], agents: state.agents || [] };
+        callState = { lines: state.lines || [], lineSessions: state.lineSessions || [], agents: state.agents || [], lineRoster: state.lineRoster || {} };
         callMessage('');
         renderCalls();
     } catch (err) {
@@ -358,6 +358,16 @@ function renderCalls() {
         elCallStatusLabel.textContent = 'Not on a line';
         elCallStatusMain.textContent = currentAgentName || '';
         elCallStatusSub.textContent = agent ? 'Available for tickets.' : 'Your agent record was not found.';
+    }
+
+    // What the roster says is coming, so the popup answers "am I up next?" without
+    // waiting for the notification.
+    const duty = upcomingRosterDuty(callState, currentAgentId, new Date(), 60);
+    if (duty) {
+        const when = duty.minutesUntil <= 0 ? 'now'
+            : duty.minutesUntil === 1 ? 'in 1 minute'
+            : `in ${duty.minutesUntil} minutes`;
+        elCallStatusSub.textContent = `Rostered on ${duty.lineName} ${when} (${duty.slotLabel}, from ${duty.start}).`;
     }
 
     setTabCount(elCallsCount, mine ? 1 : 0, false);

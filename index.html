@@ -774,6 +774,7 @@
                                     <button class="btn btn-purple perm-manage-lines" id="btn-roster-auto" style="padding: 0.4rem 1rem; font-size: 0.8rem;">Auto-assign</button>
                                     <button class="btn btn-outline perm-manage-lines" id="btn-roster-slots" style="padding: 0.4rem 1rem; font-size: 0.8rem;">Time Slots</button>
                                     <button class="btn btn-outline perm-manage-lines" id="btn-roster-import" style="padding: 0.4rem 1rem; font-size: 0.8rem;">Import CSV</button>
+                                    <button class="btn btn-outline perm-manage-lines" id="btn-roster-clear" style="padding: 0.4rem 1rem; font-size: 0.8rem; color:#f43f5e;">Clear</button>
                                     <input type="file" id="roster-import-file" accept=".csv,text/csv" class="hidden">
                                     <button class="btn btn-outline" id="btn-roster-export-csv" style="padding: 0.4rem 1rem; font-size: 0.8rem;">CSV</button>
                                     <button class="btn btn-outline" id="btn-roster-export-pdf" style="padding: 0.4rem 1rem; font-size: 0.8rem;">PDF</button>
@@ -1230,9 +1231,12 @@
                 </div>
                 <button type="submit" class="btn btn-primary" style="padding:0.7rem 1rem;">Add</button>
             </form>
-            <div style="display: flex; gap: 1rem; margin-top: 1.5rem;">
-                <button type="button" class="btn btn-outline" style="flex: 1;" onclick="window.closeModals()">Done</button>
+            <div style="display: flex; gap: 0.75rem; margin-top: 1.5rem; flex-wrap: wrap;">
+                <button type="button" class="btn btn-outline" style="flex: 1 1 140px;" onclick="window.restoreDefaultRosterSlots()">Restore defaults</button>
+                <button type="button" class="btn btn-outline" style="flex: 1 1 100px;" onclick="window.cancelRosterSlotChanges()">Cancel</button>
+                <button type="button" class="btn btn-primary" style="flex: 1 1 100px;" onclick="window.closeModals()">Done</button>
             </div>
+            <span class="input-hint" style="margin-top:0.75rem; display:block;">Cancel undoes everything changed since this dialog opened. Restore defaults puts back the standard 9&nbsp;to&nbsp;11 … 5&nbsp;to&nbsp;6 blocks.</span>
         </div>
     </div>
 
@@ -2000,6 +2004,7 @@
             btnRosterDefault: document.getElementById('btn-roster-default'),
             btnRosterSlots: document.getElementById('btn-roster-slots'),
             btnRosterImport: document.getElementById('btn-roster-import'),
+            btnRosterClear: document.getElementById('btn-roster-clear'),
             rosterImportFile: document.getElementById('roster-import-file'),
             btnRosterExportCsv: document.getElementById('btn-roster-export-csv'),
             btnRosterExportPdf: document.getElementById('btn-roster-export-pdf'),
@@ -2441,6 +2446,7 @@
             UI.btnRosterDefault.addEventListener('click', window.loadDefaultRoster);
             UI.btnRosterSlots.addEventListener('click', window.openRosterSlotsModal);
             UI.btnRosterImport.addEventListener('click', () => UI.rosterImportFile.click());
+            UI.btnRosterClear.addEventListener('click', window.clearRoster);
             UI.rosterImportFile.addEventListener('change', handleRosterImportFile);
             UI.btnRosterImportApply.addEventListener('click', applyRosterImport);
             UI.formRosterSlot.addEventListener('submit', submitRosterSlot);
@@ -8039,6 +8045,22 @@ Exported ${escapeHtml(formatZendeskTimestampWithYear(new Date().toISOString()))}
             return { agent: null };
         }
 
+        // Wipes every assignment, including any left behind by a deleted time block. Slots
+        // themselves are untouched -- those have their own Restore defaults.
+        window.clearRoster = async function() {
+            if (!canManageLines()) return notify('You do not have permission to edit the roster.');
+            const assigned = [...rosterLoadTotals().values()].reduce((sum, r) => sum + r.slots, 0);
+            if (assigned === 0) return notify('The roster is already empty.');
+            if (!confirm(`Clear all ${assigned} roster assignment(s)? The time blocks stay as they are. This cannot be undone.`)) return;
+
+            const ok = await saveRoster(r => { r.grid = {}; return r; });
+            if (!ok) return;
+            logActivity('Call Lines', `The call roster was cleared — ${assigned} assignment(s) removed`);
+            State.commit(['activities']);
+            renderRoster();
+            notify('Roster cleared.');
+        };
+
         window.loadDefaultRoster = async function() {
             if (!canManageLines()) return notify('You do not have permission to edit the roster.');
             const built = buildDefaultRosterGrid();
@@ -8090,10 +8112,42 @@ Exported ${escapeHtml(formatZendeskTimestampWithYear(new Date().toISOString()))}
 
         /* --- Time slots --- */
 
+        // Slot edits save as they are made (they have to -- the grid is keyed by slot id), so
+        // Cancel works from a snapshot taken when the dialog opened rather than by deferring
+        // the writes. Deleting a block is otherwise unrecoverable, which is exactly how the
+        // 9-to-11 block went missing.
+        let rosterSlotsSnapshot = null;
+
         window.openRosterSlotsModal = function() {
             if (!canManageLines()) return notify('You do not have permission to edit the roster.');
+            rosterSlotsSnapshot = JSON.parse(JSON.stringify(rosterData()));
             renderRosterSlotList();
             UI.modalRosterSlots.classList.add('active');
+        };
+
+        window.cancelRosterSlotChanges = async function() {
+            const snap = rosterSlotsSnapshot;
+            rosterSlotsSnapshot = null;
+            if (!snap) return window.closeModals();
+            const ok = await saveRoster(() => ({ slots: snap.slots, grid: snap.grid }));
+            window.closeModals();
+            if (!ok) return;
+            renderRoster();
+            notify('Time slot changes undone.');
+        };
+
+        window.restoreDefaultRosterSlots = async function() {
+            if (!canManageLines()) return notify('You do not have permission to edit the roster.');
+            const ok = await saveRoster(r => {
+                r.slots = DEFAULT_ROSTER_SLOTS.map(s => ({ ...s }));
+                return r;
+            });
+            if (!ok) return;
+            logActivity('Call Lines', 'The roster time slots were restored to the standard blocks');
+            State.commit(['activities']);
+            renderRosterSlotList();
+            renderRoster();
+            notify('Standard time slots restored.');
         };
 
         function renderRosterSlotList() {
@@ -8151,9 +8205,11 @@ Exported ${escapeHtml(formatZendeskTimestampWithYear(new Date().toISOString()))}
                 if (r.slots.length <= 1) return null;
                 label = slot.label;
                 r.slots = r.slots.filter(s => s.id !== id);
-                // Assignments for a slot that no longer exists would linger invisibly and
-                // reappear if a slot with the same id were ever recreated.
-                Object.keys(r.grid).forEach(day => { if (r.grid[day]) delete r.grid[day][id]; });
+                // The assignments for this block are deliberately KEPT. Nothing renders a slot
+                // that isn't in the list, so they are invisible either way -- but keeping them
+                // means restoring the block (by Cancel, or Restore defaults, which reuses the
+                // same ids) brings its rota back instead of silently emptying that row.
+                // "Clear the roster" is the way to actually discard them.
                 return r;
             });
             if (!ok) return notify('A roster needs at least one time slot.');

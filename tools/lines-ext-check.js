@@ -125,9 +125,11 @@ const globals = {
 };
 const factory = new Function(...Object.keys(globals), `
     ${src}
-    return { toFirestoreValue, updateSharedFields, lineCheckIn, lineCheckOut, setPresence, fetchState };
+    return { toFirestoreValue, updateSharedFields, lineCheckIn, lineCheckOut, setPresence, fetchState,
+             upcomingRosterDuty, rosterLinesFrom, rosterDayFor };
 `);
 const X = factory(...Object.values(globals));
+const { upcomingRosterDuty } = X;
 
 // ---- test rig --------------------------------------------------------------
 let pass = 0, fail = 0;
@@ -257,6 +259,76 @@ const BASE = {
     check('lineSessions returned', Array.isArray(st.lineSessions));
     check('existing fields still returned', Array.isArray(st.tickets) && Array.isArray(st.agents));
 
+
+    console.log('\n12. Roster reminders: which line, and when');
+    const SLOTS = [
+        { id: 'slot-1', label: '9 to 11', start: '21:00', end: '23:00' },
+        { id: 'slot-2', label: '11 to 1', start: '23:00', end: '01:00' },
+        { id: 'slot-3', label: '1 to 3', start: '01:00', end: '03:00' },
+        { id: 'slot-4', label: '3 to 5', start: '03:00', end: '05:00' },
+        { id: 'slot-5', label: '5 to 6', start: '05:00', end: '06:00' }
+    ];
+    const RSTATE = {
+        lines: [
+            { id: 'L1', name: 'Line 1', order: 0 },
+            { id: 'L2', name: 'Line 2 / Opsmon', order: 1 },
+            { id: 'L3', name: 'Line 3', order: 2 },
+            { id: 'L9', name: 'Line 9', order: 3 }
+        ],
+        lineRoster: {
+            slots: SLOTS,
+            grid: {
+                // Monday (rota day 1)
+                '1': {
+                    'slot-1': { L1: 'me', L2: 'other' },
+                    'slot-2': { L2: 'me' },
+                    'slot-3': { L3: 'other' }
+                },
+                '2': { 'slot-1': { L1: 'other' } }
+            }
+        }
+    };
+    // Monday 2026-09-14 20:55 -> the 21:00 block is five minutes away.
+    const at = (y, mo, d, h, mi) => new Date(y, mo - 1, d, h, mi, 0, 0);
+    let duty = upcomingRosterDuty(RSTATE, 'me', at(2026, 9, 14, 20, 55), 5);
+    check('warns five minutes before the block', !!duty, JSON.stringify(duty));
+    check('names the right line', duty && duty.lineName === 'Line 1', duty && duty.lineName);
+    check('reports the minutes left', duty && duty.minutesUntil === 5, duty && String(duty.minutesUntil));
+    check('key identifies day, slot and line', duty && duty.key === '1|slot-1|L1', duty && duty.key);
+
+    check('nothing six minutes out', upcomingRosterDuty(RSTATE, 'me', at(2026, 9, 14, 20, 54), 5) === null);
+    check('still fires one minute out', !!upcomingRosterDuty(RSTATE, 'me', at(2026, 9, 14, 20, 59), 5));
+    check('nothing once the block has started', upcomingRosterDuty(RSTATE, 'me', at(2026, 9, 14, 21, 1), 5) === null);
+    check('nothing for a block somebody else has', upcomingRosterDuty(RSTATE, 'other', at(2026, 9, 14, 20, 55), 5).lineName === 'Line 2 / Opsmon');
+
+    console.log('\n13. Reminders across midnight and the 6am rota rollover');
+    // 22:55 Monday -> the 23:00 block, still Monday's rota.
+    duty = upcomingRosterDuty(RSTATE, 'me', at(2026, 9, 14, 22, 55), 5);
+    check('the 23:00 block is found', !!duty && duty.slotId === 'slot-2', JSON.stringify(duty));
+    check('and on the right line', duty && duty.lineName === 'Line 2 / Opsmon');
+    // 00:55 on Tuesday morning is still MONDAY's rota (day rolls at 6am), so the 01:00
+    // block belongs to Monday and is assigned to "other", not to "me".
+    duty = upcomingRosterDuty(RSTATE, 'me', at(2026, 9, 15, 0, 55), 5);
+    check('after midnight the rota day is still the previous evening', duty === null, JSON.stringify(duty));
+    duty = upcomingRosterDuty(RSTATE, 'other', at(2026, 9, 15, 0, 55), 5);
+    check('and the block resolves to whoever Monday has on it', !!duty && duty.day === 1 && duty.lineName === 'Line 3', JSON.stringify(duty));
+
+    console.log('\n14. Reminders only cover the roster lines');
+    const OFF_ROSTER = JSON.parse(JSON.stringify(RSTATE));
+    OFF_ROSTER.lineRoster.grid['1']['slot-1'] = { L9: 'me' };
+    check('a line outside the roster set is ignored',
+        upcomingRosterDuty(OFF_ROSTER, 'me', at(2026, 9, 14, 20, 55), 5) === null);
+    const EXPLICIT = JSON.parse(JSON.stringify(RSTATE));
+    EXPLICIT.lines = EXPLICIT.lines.map(l => ({ ...l, inRoster: l.id === 'L9' }));
+    EXPLICIT.lineRoster.grid['1']['slot-1'] = { L9: 'me' };
+    check('but an explicit inRoster flag is honoured',
+        (upcomingRosterDuty(EXPLICIT, 'me', at(2026, 9, 14, 20, 55), 5) || {}).lineName === 'Line 9');
+
+    console.log('\n15. Reminders degrade safely');
+    check('no agent id', upcomingRosterDuty(RSTATE, '', at(2026, 9, 14, 20, 55), 5) === null);
+    check('no roster at all', upcomingRosterDuty({ lines: RSTATE.lines }, 'me', at(2026, 9, 14, 20, 55), 5) === null);
+    check('roster with no slots', upcomingRosterDuty({ lines: RSTATE.lines, lineRoster: { slots: [], grid: {} } }, 'me', new Date(), 5) === null);
+    check('empty state', upcomingRosterDuty({}, 'me', new Date(), 5) === null);
     console.log(`\n${pass} passed, ${fail} failed\n`);
     process.exit(fail === 0 ? 0 : 1);
 })();

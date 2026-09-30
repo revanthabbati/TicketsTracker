@@ -129,7 +129,13 @@ async function checkForNewAssignments() {
             return;
         }
 
-        const { tickets, settings } = await fetchState();
+        const state = await fetchState();
+        const { tickets, settings } = state;
+
+        // Placed here, before any of the early returns below, so the roster warning still
+        // fires on the very first poll after setup.
+        await checkRosterDuty(state);
+
         const myTickets = tickets
             .filter(t => t.agentId === agentId)
             .sort((a, b) => parseTicketTimestamp(b) - parseTicketTimestamp(a));
@@ -187,4 +193,36 @@ function notifyNewAssignments(newOnes) {
         });
     }
     maybePlayAlertSound();
+}
+
+// Warns an agent shortly before their rostered block starts, so they can be on the line at
+// the top of the hour instead of noticing late. Runs on the existing one-minute alarm --
+// no extra polling, since checkForNewAssignments already fetches the same document.
+async function checkRosterDuty(state) {
+    try {
+        const { agentId, rosterAlertsEnabled, lastRosterAlertKey } = await chrome.storage.local.get(
+            ['agentId', 'rosterAlertsEnabled', 'lastRosterAlertKey']);
+        if (!agentId) return;
+        if (rosterAlertsEnabled === false) return;   // on by default until turned off
+
+        const duty = upcomingRosterDuty(state, agentId, new Date(), ROSTER_ALERT_LEAD_MINUTES);
+        if (!duty) return;
+        // One alert per block. The one-minute alarm would otherwise fire this five times.
+        if (lastRosterAlertKey === duty.key) return;
+
+        await chrome.storage.local.set({ lastRosterAlertKey: duty.key });
+
+        const when = duty.minutesUntil <= 0 ? 'now'
+            : duty.minutesUntil === 1 ? 'in 1 minute'
+            : `in ${duty.minutesUntil} minutes`;
+        chrome.notifications.create(`roster-${duty.key}`, {
+            type: 'basic',
+            iconUrl: 'icons/icon128.png',
+            title: `You're on ${duty.lineName} ${when}`,
+            message: `${duty.slotLabel} starts at ${duty.start}. Check in on the Calls tab when you take the line.`
+        });
+        maybePlayAlertSound();
+    } catch (err) {
+        console.error('Tracker Notifier: roster check failed', err);
+    }
 }

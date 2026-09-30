@@ -134,6 +134,11 @@ fail here instead:
 It also covers capacity, closed lines, line switching, check-out, and that Away clears floor
 availability and closes the line session in a *single* commit, so it can never half-apply.
 
+Since 1.6.0 it additionally covers **roster reminders** — that an agent is warned within the
+lead window and not outside it, that the line named is the right one, that reminders only cover
+the roster's own lines, and that the 6am rota rollover is applied (at 00:55 the 01:00 block
+still belongs to the previous evening's rota, not to the new calendar day).
+
 Like the other harnesses it reads the real functions out of `browser-extension/firestore.js`
 at runtime. No network, no credentials, no production data.
 

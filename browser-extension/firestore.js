@@ -46,7 +46,8 @@ async function fetchState() {
         agents: parseFirestoreFields(fields, 'agents'),
         settings: fields.settings ? parseFirestoreValue(fields.settings) : {},
         lines: parseFirestoreFields(fields, 'lines'),
-        lineSessions: parseFirestoreFields(fields, 'lineSessions')
+        lineSessions: parseFirestoreFields(fields, 'lineSessions'),
+        lineRoster: fields.lineRoster ? parseFirestoreValue(fields.lineRoster) : {}
     };
 }
 
@@ -436,4 +437,89 @@ async function setPresence(agentId, away) {
         if (nextSessions !== sessions) payload.lineSessions = nextSessions;
         return { payload, info: { closedLineName, resumeLineId } };
     });
+}
+
+/* --- CALL ROSTER ---
+   Mirrors the rota rules from index.html so the extension can warn an agent just before
+   their block starts. The two cannot share code (no bundler, different runtimes), so the
+   rules are restated here: which lines the roster covers, when the rota day rolls over,
+   and how a slot's start time is read. */
+
+const ROSTER_ALERT_LEAD_MINUTES = 5;
+const ROSTER_LINE_NAME_HINTS = [/^line\s*1\b/i, /^line\s*2\b/i, /^line\s*3\b/i];
+
+function sortLinesByOrder(lines) {
+    return (lines || []).slice().sort((a, b) =>
+        (a.order || 0) - (b.order || 0) || String(a.name || '').localeCompare(String(b.name || '')));
+}
+
+// Same precedence as the app: an explicit inRoster flag wins, else the Line 1/2/3 names,
+// else the first three in order.
+function rosterLinesFrom(lines) {
+    const all = sortLinesByOrder(lines);
+    const explicit = all.filter(l => l.inRoster === true);
+    if (explicit.length > 0) return explicit;
+    const candidates = all.filter(l => l.inRoster !== false);
+    const byName = candidates.filter(l => ROSTER_LINE_NAME_HINTS.some(re => re.test((l.name || '').trim())));
+    if (byName.length > 0) return byName;
+    return candidates.slice(0, 3);
+}
+
+// The shift starts at 9pm and runs past midnight, so before 6am the rota day is still
+// yesterday's -- the same rule the app uses for "today".
+function rosterDayFor(date) {
+    const d = new Date(date);
+    if (d.getHours() < 6) d.setDate(d.getDate() - 1);
+    return d.getDay();
+}
+
+function minutesOfDay(hhmm) {
+    const [h, m] = String(hhmm || '0:0').split(':').map(Number);
+    return (h || 0) * 60 + (m || 0);
+}
+
+/**
+ * The block this agent is rostered on that starts within the next `lead` minutes, or null.
+ *
+ * Deliberately only looks forward: an alert about a block that has already begun is noise,
+ * and the popup shows the current state anyway. Returns the line so the notification can
+ * name it, and a stable key so the same block is only announced once.
+ */
+function upcomingRosterDuty(state, agentId, now, lead) {
+    if (!agentId || !state || !state.lineRoster) return null;
+    const roster = state.lineRoster;
+    const slots = Array.isArray(roster.slots) ? roster.slots : [];
+    const grid = roster.grid || {};
+    if (slots.length === 0) return null;
+
+    const lines = rosterLinesFrom(state.lines);
+    const at = now || new Date();
+    const leadMinutes = typeof lead === 'number' ? lead : ROSTER_ALERT_LEAD_MINUTES;
+    const nowMinutes = at.getHours() * 60 + at.getMinutes();
+
+    for (const slot of slots) {
+        const start = minutesOfDay(slot.start);
+        // Minutes until this block begins, wrapping across midnight so a 23:00 block is
+        // five minutes away at 22:55 even though the clock numbers are far apart.
+        let until = start - nowMinutes;
+        if (until < -720) until += 1440;
+        if (until > 720) until -= 1440;
+        if (until < 0 || until > leadMinutes) continue;
+
+        // The rota day is the one the block belongs to, which for an after-midnight block
+        // is still the evening it started on.
+        const slotStartsAt = new Date(at.getTime() + until * 60000);
+        const day = rosterDayFor(slotStartsAt);
+        const cell = (grid[String(day)] || {})[slot.id] || {};
+
+        for (const line of lines) {
+            if (cell[line.id] !== agentId) continue;
+            return {
+                lineId: line.id, lineName: line.name, slotId: slot.id, slotLabel: slot.label,
+                start: slot.start, minutesUntil: until, day,
+                key: `${day}|${slot.id}|${line.id}`
+            };
+        }
+    }
+    return null;
 }

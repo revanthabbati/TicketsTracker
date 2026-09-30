@@ -5,7 +5,7 @@ A small local browser extension that notifies you when a ticket gets assigned to
 - 🔴 **Red** — assigned, initial response (IR) not sent yet
 - 🟢 **Green** — IR already sent
 
-It reads the same shared Firestore document the tracker app itself uses. Ticket notifications are read-only; the **Calls** tab (added in 1.4.0) is the only part that writes anything, and it only ever touches your own call-line session and your own availability flag.
+It reads the same shared Firestore document the tracker app itself uses. Ticket notifications are read-only; the **Calls** tab (added in 1.4.0) is the only part that writes anything, and it only ever touches your own call-line session and your own availability flag. Since 1.6.0 it also reads the call roster to remind you before you are due on a line.
 
 ## Install (Chrome / Edge / Brave)
 
@@ -75,6 +75,22 @@ Separately from your own assignments, this checks Zendesk every 5 minutes for ti
 ## Alert sound
 
 On by default (Chime — Ping and Bell are also available in Options, along with an off switch and a Test button). Plays whenever a new-assignment or unassigned-queue notification fires. Since 1.5.0 you can also set the volume and upload your own sound — see below.
+
+## Roster reminders
+
+If you're on the call roster, the extension warns you **5 minutes before your block starts**:
+
+> **You're on Line 2 / Opsmon in 5 minutes**
+> 11 to 1 starts at 23:00. Check in on the Calls tab when you take the line.
+
+It fires once per block, plays the same alert sound, and only covers the lines the roster
+actually uses. The Calls tab also shows what's coming within the next hour, so you can check
+without waiting for the notification.
+
+Turn it off under **Roster reminders** in Options. It's on by default.
+
+The rota day rolls over at 6am, matching the app: at 00:55 the block starting at 01:00 still
+belongs to the previous evening's rota, which is what the roster grid is keyed by.
 
 ## Volume and your own sounds
 

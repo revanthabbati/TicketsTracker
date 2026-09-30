@@ -1,11 +1,14 @@
 const elSelect = document.getElementById('agent-select');
 const elStatus = document.getElementById('status');
 const elSoundEnabled = document.getElementById('sound-enabled');
+const elRosterAlerts = document.getElementById('roster-alerts-enabled');
 const elSoundSelect = document.getElementById('sound-select');
 
 async function init() {
-    const { agentId: savedAgentId, soundEnabled, soundChoice, soundVolume, customSounds: savedSounds } =
-        await chrome.storage.local.get(['agentId', 'soundEnabled', 'soundChoice', 'soundVolume', 'customSounds']);
+    const { agentId: savedAgentId, soundEnabled, soundChoice, soundVolume, customSounds: savedSounds, rosterAlertsEnabled } =
+        await chrome.storage.local.get(['agentId', 'soundEnabled', 'soundChoice', 'soundVolume', 'customSounds', 'rosterAlertsEnabled']);
+
+    elRosterAlerts.checked = rosterAlertsEnabled !== false;   // on by default
 
     elSoundEnabled.checked = soundEnabled !== false; // enabled by default
 
@@ -62,7 +65,7 @@ document.getElementById('btn-save').addEventListener('click', async () => {
 
     chrome.runtime.sendMessage({ type: 'pollNow' });
 
-    await chrome.storage.local.set({ soundEnabled: elSoundEnabled.checked, soundChoice: elSoundSelect.value, soundVolume: currentVolume() });
+    await chrome.storage.local.set({ soundEnabled: elSoundEnabled.checked, soundChoice: elSoundSelect.value, soundVolume: currentVolume(), rosterAlertsEnabled: elRosterAlerts.checked });
 
     elStatus.classList.remove('error');
     elStatus.textContent = `Saved — you're set up as ${newAgentName}.`;
