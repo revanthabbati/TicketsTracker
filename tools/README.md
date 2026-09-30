@@ -71,7 +71,7 @@ clicking through the app because they need two people acting at once.
 node tools/lines-check.js
 ```
 
-Runs 143 assertions covering:
+Runs 160 assertions covering:
 
 - **seat capacity under a race** — two agents taking the last seat at the same instant, with a
   second client deliberately committing mid-transaction. A line must never exceed its capacity.

@@ -126,7 +126,7 @@ const globals = {
 const factory = new Function(...Object.keys(globals), `
     ${src}
     return { toFirestoreValue, updateSharedFields, lineCheckIn, lineCheckOut, setPresence, fetchState,
-             upcomingRosterDuty, rosterLinesFrom, rosterDayFor };
+             upcomingRosterDuty, rosterLinesFrom, rosterDayFor, isAgentOnBreak, isAgentOnShiftNow };
 `);
 const X = factory(...Object.values(globals));
 const { upcomingRosterDuty } = X;
@@ -329,6 +329,36 @@ const BASE = {
     check('no roster at all', upcomingRosterDuty({ lines: RSTATE.lines }, 'me', at(2026, 9, 14, 20, 55), 5) === null);
     check('roster with no slots', upcomingRosterDuty({ lines: RSTATE.lines, lineRoster: { slots: [], grid: {} } }, 'me', new Date(), 5) === null);
     check('empty state', upcomingRosterDuty({}, 'me', new Date(), 5) === null);
+
+    console.log('\n16. The Calls tab lists breaks, not people who are off shift');
+    // Reported from the popup: "On a break — Ganesh Thota, Sriharsha Gajji, Shay Powell",
+    // who were simply outside their working hours at the time.
+    const everyDay = t => Object.fromEntries([0, 1, 2, 3, 4, 5, 6].map(d => [d, t]));
+    const sh = (a, b) => ({ start: a, end: b });
+    const AT = (y, mo, d, h, mi) => new Date(y, mo - 1, d, h, mi, 0, 0);
+    const at2300 = AT(2026, 9, 16, 23, 0);
+    const at0200 = AT(2026, 9, 16, 2, 0);
+    const away = shifts => ({ presence: 'away', isAvailable: false, shifts });
+
+    check('13:00-22:00 is not a break at 23:00',
+        X.isAgentOnBreak(away(everyDay(sh('13:00', '22:00'))), at2300) === false);
+    check('04:00-14:00 is not a break at 23:00',
+        X.isAgentOnBreak(away(everyDay(sh('04:00', '14:00'))), at2300) === false);
+    check('18:30-02:30 IS a break at 23:00 (they are mid-shift)',
+        X.isAgentOnBreak(away(everyDay(sh('18:30', '02:30'))), at2300) === true);
+    check('21:00-06:00 IS a break at 23:00',
+        X.isAgentOnBreak(away(everyDay(sh('21:00', '06:00'))), at2300) === true);
+    check('21:00-06:00 is still a break at 02:00 (overnight)',
+        X.isAgentOnBreak(away(everyDay(sh('21:00', '06:00'))), at0200) === true);
+    check('13:00-22:00 is not a break at 02:00',
+        X.isAgentOnBreak(away(everyDay(sh('13:00', '22:00'))), at0200) === false);
+    check('available agents are never on a break',
+        X.isAgentOnBreak({ presence: 'away', isAvailable: true, shifts: everyDay(sh('21:00', '06:00')) }, at2300) === false);
+    check('unavailable without the away flag is not a break',
+        X.isAgentOnBreak({ presence: 'in', isAvailable: false, shifts: everyDay(sh('21:00', '06:00')) }, at2300) === false);
+    check('an agent with no shifts recorded still reports a real break',
+        X.isAgentOnBreak({ presence: 'away', isAvailable: false, shifts: {} }, at2300) === true);
+    check('undefined is safe', X.isAgentOnBreak(undefined, at2300) === false);
     console.log(`\n${pass} passed, ${fail} failed\n`);
     process.exit(fail === 0 ? 0 : 1);
 })();

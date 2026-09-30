@@ -3503,7 +3503,10 @@
                 const id = e.target.dataset.id;
                 const agent = State.agents.find(a => a.id === id);
                 if (agent) {
-                    const wasAway = isAgentAway(agent);
+                    // The raw flag, not isAgentAway(): an off-shift agent carrying a stale
+                    // presence flag still needs it cleared when they are switched back on,
+                    // even though they don't currently read as being on a break.
+                    const wasAway = agentPresence(agent) === PRESENCE_AWAY;
                     // Presence and availability are two views of the same fact, so flipping
                     // this switch has to move both -- otherwise an agent turned Available here
                     // would still read "Away" on the Call Lines board, and setting them Away
@@ -7008,12 +7011,43 @@ Exported ${escapeHtml(formatZendeskTimestampWithYear(new Date().toISOString()))}
             return agent && agent.presence === PRESENCE_AWAY ? PRESENCE_AWAY : 'in';
         }
 
-        // Away is only meaningful while the agent is genuinely off the floor. Tying it to
-        // isAvailable means every other path that puts someone back on -- the roster toggle,
-        // the shift evaluator running in any tab -- clears Away implicitly, so the badge and
-        // the availability switch can never end up disagreeing on screen.
-        function isAgentAway(agent) {
-            return !!agent && agentPresence(agent) === PRESENCE_AWAY && agent.isAvailable === false;
+        // "On a break" means stepped away MID-SHIFT. It is not the same as being off shift,
+        // and the difference matters because `isAvailable` means both: evaluateAgentShifts
+        // clears it at the end of every shift. Checking only presence + isAvailable therefore
+        // relabelled everyone whose shift had ended as being on a break, as soon as they
+        // carried a presence flag from any earlier break or manual toggle.
+        //
+        // So a break additionally requires the agent to be inside their working hours right
+        // now. Once the shift ends they simply stop being on a break -- no write needed, and
+        // a stale flag can no longer misreport them.
+        function isAgentAway(agent, now) {
+            return !!agent
+                && agentPresence(agent) === PRESENCE_AWAY
+                && agent.isAvailable === false
+                && isAgentOnShiftNow(agent, now);
+        }
+
+        // Whether `now` falls inside this agent's shift, checking today's shift and the
+        // previous day's (which is where an overnight shift running past midnight lives).
+        // No shifts recorded at all means unconstrained, matching agentAvailableForSlot.
+        function isAgentOnShiftNow(agent, now) {
+            if (!agent || !agent.shifts || Object.keys(agent.shifts).length === 0) return true;
+            // Coerced rather than defaulted: passing this predicate straight to Array.filter
+            // hands it the array INDEX as a second argument, which silently became "now".
+            const at = now instanceof Date ? now : new Date();
+            const mins = at.getHours() * 60 + at.getMinutes();
+            const today = at.getDay();
+            const yesterday = (today + 6) % 7;
+
+            const within = (shift, offset) => {
+                if (!shift) return false;
+                const { start, end } = spanMinutes(shift.start, shift.end);
+                const m = mins + offset;
+                return m >= start && m < end;
+            };
+
+            return within(agentShiftForDay(agent, today), 0)
+                || within(agentShiftForDay(agent, yesterday), 24 * 60);
         }
 
         // How long they have been away, for the "Away 12m" label on the board.
@@ -7598,7 +7632,7 @@ Exported ${escapeHtml(formatZendeskTimestampWithYear(new Date().toISOString()))}
         // above. A floor manager still needs to see them -- otherwise "nobody on Line 2" is
         // indistinguishable from "everyone who works Line 2 is on lunch".
         function renderAwayStrip() {
-            const awayAgents = State.agents.filter(isAgentAway);
+            const awayAgents = State.agents.filter(a => isAgentAway(a));
             if (awayAgents.length === 0) return '';
             const supervisor = canManageLines();
             return `<div class="line-away-strip">
@@ -7685,7 +7719,7 @@ Exported ${escapeHtml(formatZendeskTimestampWithYear(new Date().toISOString()))}
             const shown = dashboardLines();
             const total = (State.lines || []).length;
             const open = openLineSessions();
-            const awayCount = State.agents.filter(isAgentAway).length;
+            const awayCount = State.agents.filter(a => isAgentAway(a)).length;
 
             UI.dashLinesMeta.innerText = total
                 ? `${open.length} on a line${awayCount ? ` · ${awayCount} on a break` : ''}${total > shown.length ? ` · showing ${shown.length} of ${total}` : ''}`

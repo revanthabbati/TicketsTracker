@@ -478,6 +478,52 @@ function minutesOfDay(hhmm) {
     return (h || 0) * 60 + (m || 0);
 }
 
+// Shifts routinely run past midnight, so both ends are unrolled onto one minute line.
+function shiftSpanMinutes(start, end) {
+    const s = minutesOfDay(start);
+    let e = minutesOfDay(end);
+    if (e <= s) e += 24 * 60;
+    return { start: s, end: e };
+}
+
+function agentShiftFor(agent, dayIdx) {
+    if (!agent || !agent.shifts) return null;
+    const s = agent.shifts[dayIdx] || agent.shifts[String(dayIdx)];
+    return s && s.start && s.end ? s : null;
+}
+
+// Whether `now` is inside this agent's shift, checking today's and the previous day's
+// (an overnight shift running past midnight belongs to the day it started).
+function isAgentOnShiftNow(agent, now) {
+    if (!agent || !agent.shifts || Object.keys(agent.shifts).length === 0) return true;
+    // Coerced rather than defaulted, so passing this through Array.filter (which supplies
+    // the index as a second argument) can't quietly turn "now" into a number.
+    const at = now instanceof Date ? now : new Date();
+    const mins = at.getHours() * 60 + at.getMinutes();
+    const today = at.getDay();
+    const yesterday = (today + 6) % 7;
+
+    const within = (shift, offset) => {
+        if (!shift) return false;
+        const { start, end } = shiftSpanMinutes(shift.start, shift.end);
+        const m = mins + offset;
+        return m >= start && m < end;
+    };
+
+    return within(agentShiftFor(agent, today), 0)
+        || within(agentShiftFor(agent, yesterday), 24 * 60);
+}
+
+// "On a break" means stepped away MID-SHIFT. `isAvailable` alone can't say that, because
+// the app clears it at the end of every shift too -- which was listing everyone who had
+// simply finished for the day as being on a break.
+function isAgentOnBreak(agent, now) {
+    return !!agent
+        && agent.presence === 'away'
+        && agent.isAvailable === false
+        && isAgentOnShiftNow(agent, now);
+}
+
 /**
  * The block this agent is rostered on that starts within the next `lead` minutes, or null.
  *

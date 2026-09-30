@@ -314,9 +314,8 @@ function myCallAgent() {
 
 function amAway() {
     const a = myCallAgent();
-    // Mirrors the app: Away only counts while actually off the floor, so anything that puts
-    // the agent back on (a manager's toggle, the shift evaluator) clears it here too.
-    return !!a && a.presence === 'away' && a.isAvailable === false;
+    // Mirrors the app: a break is stepping away mid-shift, not simply being off shift.
+    return isAgentOnBreak(a);
 }
 
 async function loadCalls(force) {
@@ -452,7 +451,7 @@ function renderCallBoard() {
         elCallBoard.appendChild(row);
     });
 
-    const awayAgents = callState.agents.filter(a => a.presence === 'away' && a.isAvailable === false);
+    const awayAgents = callState.agents.filter(a => isAgentOnBreak(a));
     if (awayAgents.length > 0) {
         const row = document.createElement('div');
         row.className = 'call-line-row';

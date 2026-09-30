@@ -82,6 +82,7 @@ const factory = new Function(...Object.keys(globals), `
              dashboardLineCount, dashboardLines, canViewLineReports, mutateDocObject,
              autoAssignRoster, rosterSlotHours, parseRosterCsv, matchAgentByName,
              shiftCoversSlot, agentAvailableForSlot, rosterLines, rosterEligibleAgents,
+             isAgentOnShiftNow,
              buildDefaultRosterGrid, rosterOffShiftIn, matchRosterAgent,
              rosterLoadTotals, rosterData, DEFAULT_ROSTER_SLOTS, ROSTER_DAYS,
              moveLine: window.moveLine,
@@ -581,6 +582,60 @@ const C = { agentId: 'a3', agentName: 'Cara', userEmail: 'cara@x.com', linked: t
         L.agentAvailableForSlot({ id: 'x', shifts: {} }, 1, S('21:00', '23:00')) === true);
     check('but a shift on another day still blocks this one',
         L.agentAvailableForSlot({ id: 'x', shifts: { 2: NIGHT } }, 1, S('21:00', '23:00')) === false);
+
+    console.log('\n33. "On a break" is mid-shift only, never merely off shift');
+    // The reported bug: evaluateAgentShifts clears isAvailable at the end of every shift, so
+    // anybody carrying a presence flag from an earlier break was relabelled "on a break" for
+    // the rest of the day. Ganesh Thota (13:00-22:00), Sriharsha (04:00-14:00) and Shay
+    // Powell (18:30-02:30) all showed that way at 23:00.
+    const allDays = t => Object.fromEntries([0, 1, 2, 3, 4, 5, 6].map(d => [d, t]));
+    const T = (y, mo, d, h, mi) => new Date(y, mo - 1, d, h, mi, 0, 0);
+    const wed2300 = T(2026, 9, 16, 23, 0);   // a Wednesday, 23:00
+    const wed0200 = T(2026, 9, 16, 2, 0);    // small hours of that Wednesday
+
+    const dayShift = { presence: 'away', isAvailable: false, shifts: allDays(S('13:00', '22:00')) };
+    const morning = { presence: 'away', isAvailable: false, shifts: allDays(S('04:00', '14:00')) };
+    const evening = { presence: 'away', isAvailable: false, shifts: allDays(S('18:30', '02:30')) };
+    const night = { presence: 'away', isAvailable: false, shifts: allDays(NIGHT) };
+
+    check('a 13:00-22:00 agent is NOT on a break at 23:00', L.isAgentAway(dayShift, wed2300) === false || !L.isAgentOnShiftNow(dayShift, wed2300));
+    check('a 04:00-14:00 agent is NOT on shift at 23:00', L.isAgentOnShiftNow(morning, wed2300) === false);
+    check('an 18:30-02:30 agent IS on shift at 23:00', L.isAgentOnShiftNow(evening, wed2300) === true);
+    check('a 21:00-06:00 agent IS on shift at 23:00', L.isAgentOnShiftNow(night, wed2300) === true);
+    check('a 21:00-06:00 agent is still on shift at 02:00', L.isAgentOnShiftNow(night, wed0200) === true);
+    check('a 13:00-22:00 agent is not on shift at 02:00', L.isAgentOnShiftNow(dayShift, wed0200) === false);
+    check('an 18:30-02:30 agent is still on shift at 02:00', L.isAgentOnShiftNow(evening, wed0200) === true);
+    check('no shifts recorded means unconstrained', L.isAgentOnShiftNow({ shifts: {} }, wed2300) === true);
+    check('an agent with a shift only on other days is off shift', L.isAgentOnShiftNow({ shifts: { 0: NIGHT } }, wed2300) === false);
+
+    console.log('\n34. A genuine mid-shift break still reads as a break');
+    // isAgentAway() reads the clock, so these use the real "now" with an all-days shift that
+    // always covers it, and one that never does.
+    const always = { presence: 'away', isAvailable: false, shifts: allDays(S('00:00', '23:59')) };
+    const never = { presence: 'away', isAvailable: false, shifts: { } };
+    check('away + unavailable + on shift = on a break', L.isAgentAway(always) === true);
+    check('away flag but still available is not a break', L.isAgentAway({ ...always, isAvailable: true }) === false);
+    check('unavailable without the away flag is not a break', L.isAgentAway({ ...always, presence: 'in' }) === false);
+    check('no shifts at all still honours a real break', L.isAgentAway({ ...never, shifts: {} }) === true);
+    check('undefined agent is safe', L.isAgentAway(undefined) === false);
+
+    // Regression: these predicates are passed straight to Array.filter in the render code,
+    // which supplies the array INDEX as the second argument. With `now` defaulted via
+    // `now || new Date()` that index became the clock and threw, blanking the whole board.
+    // Calling them directly -- as every other test here does -- never exercises that path.
+    const breakRoster = [
+        { id: 'b1', presence: 'away', isAvailable: false, shifts: allDays(S('00:00', '23:59')) },
+        { id: 'b2', presence: 'in', isAvailable: true, shifts: allDays(S('00:00', '23:59')) },
+        { id: 'b3', presence: 'away', isAvailable: false, shifts: allDays(S('00:00', '23:59')) }
+    ];
+    let filterThrew = null;
+    let filtered = [];
+    try { filtered = breakRoster.filter(L.isAgentAway); } catch (err) { filterThrew = String(err.message || err); }
+    check('used directly as an Array.filter callback it does not throw', filterThrew === null, filterThrew);
+    check('and still selects the right agents', filtered.map(a => a.id).join(',') === 'b1,b3', filtered.map(a => a.id).join(','));
+    let shiftFilterThrew = null;
+    try { breakRoster.filter(L.isAgentOnShiftNow); } catch (err) { shiftFilterThrew = String(err.message || err); }
+    check('the shift predicate survives it too', shiftFilterThrew === null, shiftFilterThrew);
     console.log(`\n${pass} passed, ${fail} failed\n`);
     process.exit(fail === 0 ? 0 : 1);
 })();
