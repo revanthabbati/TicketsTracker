@@ -682,6 +682,7 @@
                     <div style="display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap;">
                         <button type="button" class="btn btn-primary" id="tab-lines-board" style="padding: 0.6rem 1.25rem;" onclick="window.switchLinesTab('board')">Live Board</button>
                         <button type="button" class="btn btn-outline perm-manage-lines" id="tab-lines-manage" style="padding: 0.6rem 1.25rem;" onclick="window.switchLinesTab('manage')">Manage Lines</button>
+                        <button type="button" class="btn btn-outline" id="tab-lines-roster" style="padding: 0.6rem 1.25rem;" onclick="window.switchLinesTab('roster')">Roster</button>
                         <button type="button" class="btn btn-outline perm-line-reports" id="tab-lines-reports" style="padding: 0.6rem 1.25rem;" onclick="window.switchLinesTab('reports')">Reports</button>
                     </div>
 
@@ -761,6 +762,48 @@
                         </div>
                     </div>
 
+
+                    <div id="lines-roster-panel" class="hidden">
+                        <div class="panel" style="margin-bottom: 1.5rem;">
+                            <div class="panel-header">
+                                <h2>Call Assignment Roster</h2>
+                                <div class="data-controls" style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap; margin-left:auto;">
+                                    <select id="roster-day-select" class="input-control" style="width:auto; padding:0.4rem 0.7rem; font-size:0.8rem;"></select>
+                                    <button class="btn btn-purple perm-manage-lines" id="btn-roster-auto" style="padding: 0.4rem 1rem; font-size: 0.8rem;">Auto-assign</button>
+                                    <button class="btn btn-outline perm-manage-lines" id="btn-roster-slots" style="padding: 0.4rem 1rem; font-size: 0.8rem;">Time Slots</button>
+                                    <button class="btn btn-outline perm-manage-lines" id="btn-roster-import" style="padding: 0.4rem 1rem; font-size: 0.8rem;">Import CSV</button>
+                                    <input type="file" id="roster-import-file" accept=".csv,text/csv" class="hidden">
+                                    <button class="btn btn-outline" id="btn-roster-export-csv" style="padding: 0.4rem 1rem; font-size: 0.8rem;">CSV</button>
+                                    <button class="btn btn-outline" id="btn-roster-export-pdf" style="padding: 0.4rem 1rem; font-size: 0.8rem;">PDF</button>
+                                    <button class="btn btn-outline" id="btn-roster-export-doc" style="padding: 0.4rem 1rem; font-size: 0.8rem;">Word</button>
+                                </div>
+                            </div>
+                            <div class="panel-body" id="roster-now-strip"></div>
+                        </div>
+
+                        <div id="roster-grid-wrap"></div>
+
+                        <div class="panel" style="margin-top: 1.5rem;">
+                            <div class="panel-header">
+                                <h2>Weekly Load</h2>
+                                <span id="roster-load-summary" style="font-size: 0.8rem; color: var(--text-muted); margin-left:auto;"></span>
+                            </div>
+                            <div class="table-scroll">
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th>Agent</th>
+                                            <th>Slots</th>
+                                            <th>Hours</th>
+                                            <th>Share</th>
+                                            <th>Days</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="table-roster-load"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
                     <div id="lines-reports-panel" class="hidden">
                         <div class="panel" style="margin-bottom: 1.5rem;">
                             <div class="panel-header">
@@ -1165,6 +1208,80 @@
         </div>
     </div>
 
+    <div id="modal-roster-slots" class="modal-overlay">
+        <div class="modal-content">
+            <h2 style="font-size: 1.4rem; font-weight: 700; margin-bottom: 0.5rem;">Roster Time Slots</h2>
+            <p style="color: var(--text-muted); margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.5;">These are the blocks the roster is divided into, used for every day of the week. A slot that ends earlier than it starts is treated as running past midnight.</p>
+            <div id="roster-slot-list"></div>
+            <form id="form-roster-slot" style="display:flex; gap:0.5rem; align-items:flex-end; flex-wrap:wrap; margin-top:1rem;">
+                <div class="input-group" style="margin-bottom:0; flex:1 1 130px;">
+                    <label>Label</label>
+                    <input type="text" id="roster-slot-label" class="input-control" placeholder="9 to 11" maxlength="24" required autocomplete="off">
+                </div>
+                <div class="input-group" style="margin-bottom:0; flex:0 0 110px;">
+                    <label>Start</label>
+                    <input type="time" id="roster-slot-start" class="input-control" required>
+                </div>
+                <div class="input-group" style="margin-bottom:0; flex:0 0 110px;">
+                    <label>End</label>
+                    <input type="time" id="roster-slot-end" class="input-control" required>
+                </div>
+                <button type="submit" class="btn btn-primary" style="padding:0.7rem 1rem;">Add</button>
+            </form>
+            <div style="display: flex; gap: 1rem; margin-top: 1.5rem;">
+                <button type="button" class="btn btn-outline" style="flex: 1;" onclick="window.closeModals()">Done</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="modal-roster-auto" class="modal-overlay">
+        <div class="modal-content">
+            <h2 style="font-size: 1.4rem; font-weight: 700; margin-bottom: 0.5rem;">Auto-assign the Roster</h2>
+            <p style="color: var(--text-muted); margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.5;">Fills the roster by giving each shift to whoever has the fewest hours so far, never putting the same person on two lines at once, and avoiding back-to-back slots where there are enough people to do so.</p>
+            <form id="form-roster-auto">
+                <div class="input-group">
+                    <label>Cover</label>
+                    <select id="roster-auto-scope" class="input-control">
+                        <option value="day">The day currently shown</option>
+                        <option value="week" selected>The whole week</option>
+                    </select>
+                </div>
+                <div class="input-group">
+                    <label>Existing assignments</label>
+                    <select id="roster-auto-mode" class="input-control">
+                        <option value="fill" selected>Keep them — only fill empty slots</option>
+                        <option value="replace">Replace everything</option>
+                    </select>
+                </div>
+                <div class="input-group">
+                    <label>Who to roster</label>
+                    <select id="roster-auto-pool" class="input-control">
+                        <option value="available" selected>Support agents currently on the floor</option>
+                        <option value="support">All support agents</option>
+                        <option value="all">Every agent</option>
+                    </select>
+                    <span class="input-hint" id="roster-auto-pool-hint"></span>
+                </div>
+                <div style="display: flex; gap: 1rem; margin-top: 2rem;">
+                    <button type="button" class="btn btn-outline" style="flex: 1;" onclick="window.closeModals()">Cancel</button>
+                    <button type="submit" class="btn btn-primary" style="flex: 1;">Generate</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="modal-roster-import" class="modal-overlay">
+        <div class="modal-content wide">
+            <h2 style="font-size: 1.4rem; font-weight: 700; margin-bottom: 0.5rem;">Import Roster</h2>
+            <p style="color: var(--text-muted); margin-bottom: 1.25rem; font-size: 0.85rem; line-height: 1.5;" id="roster-import-summary"></p>
+            <div id="roster-import-report"></div>
+            <div style="display: flex; gap: 1rem; margin-top: 1.5rem;">
+                <button type="button" class="btn btn-outline" style="flex: 1;" onclick="window.closeModals()">Cancel</button>
+                <button type="button" class="btn btn-primary" style="flex: 1;" id="btn-roster-import-apply">Apply Import</button>
+            </div>
+        </div>
+    </div>
+
     <div id="modal-edit-session" class="modal-overlay">
         <div class="modal-content">
             <h2 style="font-size: 1.4rem; font-weight: 700; margin-bottom: 0.5rem;">Edit Line Session</h2>
@@ -1557,6 +1674,7 @@
             lines: [],
             lineSessions: [],
             lineSettings: {},
+            lineRoster: {},
 
             // Writes ONLY the top-level fields named in `fields` (e.g. commit(['agents'])),
             // instead of blindly overwriting the whole document every time. This matters
@@ -1700,6 +1818,7 @@
                 State.lines = data.lines || [];
                 State.lineSessions = data.lineSessions || [];
                 State.lineSettings = data.lineSettings || {};
+                State.lineRoster = data.lineRoster || {};
 
                 // Checked cheaply against the snapshot we already have, so the transaction is
                 // only opened when there is genuinely something to archive or restore --
@@ -1868,6 +1987,36 @@
             statLinesOnCall: document.getElementById('stat-lines-oncall'),
             statLinesSeats: document.getElementById('stat-lines-seats'),
             statLinesMyTime: document.getElementById('stat-lines-mytime'),
+            tabLinesRoster: document.getElementById('tab-lines-roster'),
+            panelLinesRoster: document.getElementById('lines-roster-panel'),
+            rosterDaySelect: document.getElementById('roster-day-select'),
+            rosterNowStrip: document.getElementById('roster-now-strip'),
+            rosterGridWrap: document.getElementById('roster-grid-wrap'),
+            rosterLoadSummary: document.getElementById('roster-load-summary'),
+            tableRosterLoad: document.getElementById('table-roster-load'),
+            btnRosterAuto: document.getElementById('btn-roster-auto'),
+            btnRosterSlots: document.getElementById('btn-roster-slots'),
+            btnRosterImport: document.getElementById('btn-roster-import'),
+            rosterImportFile: document.getElementById('roster-import-file'),
+            btnRosterExportCsv: document.getElementById('btn-roster-export-csv'),
+            btnRosterExportPdf: document.getElementById('btn-roster-export-pdf'),
+            btnRosterExportDoc: document.getElementById('btn-roster-export-doc'),
+            modalRosterSlots: document.getElementById('modal-roster-slots'),
+            rosterSlotList: document.getElementById('roster-slot-list'),
+            formRosterSlot: document.getElementById('form-roster-slot'),
+            rosterSlotLabel: document.getElementById('roster-slot-label'),
+            rosterSlotStart: document.getElementById('roster-slot-start'),
+            rosterSlotEnd: document.getElementById('roster-slot-end'),
+            modalRosterAuto: document.getElementById('modal-roster-auto'),
+            formRosterAuto: document.getElementById('form-roster-auto'),
+            rosterAutoScope: document.getElementById('roster-auto-scope'),
+            rosterAutoMode: document.getElementById('roster-auto-mode'),
+            rosterAutoPool: document.getElementById('roster-auto-pool'),
+            rosterAutoPoolHint: document.getElementById('roster-auto-pool-hint'),
+            modalRosterImport: document.getElementById('modal-roster-import'),
+            rosterImportSummary: document.getElementById('roster-import-summary'),
+            rosterImportReport: document.getElementById('roster-import-report'),
+            btnRosterImportApply: document.getElementById('btn-roster-import-apply'),
             tabLinesBoard: document.getElementById('tab-lines-board'),
             tabLinesManage: document.getElementById('tab-lines-manage'),
             tabLinesReports: document.getElementById('tab-lines-reports'),
@@ -2282,6 +2431,20 @@
             UI.btnLinesExportCsv.addEventListener('click', exportLinesCsv);
             UI.btnLinesExportPdf.addEventListener('click', exportLinesPdf);
             UI.btnLinesExportDoc.addEventListener('click', exportLinesDoc);
+
+            // Call roster
+            UI.rosterDaySelect.addEventListener('change', renderRoster);
+            UI.btnRosterAuto.addEventListener('click', window.openRosterAutoModal);
+            UI.btnRosterSlots.addEventListener('click', window.openRosterSlotsModal);
+            UI.btnRosterImport.addEventListener('click', () => UI.rosterImportFile.click());
+            UI.rosterImportFile.addEventListener('change', handleRosterImportFile);
+            UI.btnRosterImportApply.addEventListener('click', applyRosterImport);
+            UI.formRosterSlot.addEventListener('submit', submitRosterSlot);
+            UI.formRosterAuto.addEventListener('submit', submitRosterAuto);
+            UI.rosterAutoPool.addEventListener('change', updateRosterPoolHint);
+            UI.btnRosterExportCsv.addEventListener('click', exportRosterCsv);
+            UI.btnRosterExportPdf.addEventListener('click', exportRosterPdf);
+            UI.btnRosterExportDoc.addEventListener('click', exportRosterDoc);
             UI.btnDashLinesOpen.addEventListener('click', () => document.querySelector('.nav-item[data-target="view-lines"]').click());
             UI.lineDrillRange.addEventListener('change', renderLineDrill);
             [UI.linesReportStart, UI.linesReportEnd, UI.linesReportLine, UI.linesReportAgent]
@@ -2383,6 +2546,9 @@
             UI.modalLineDrill.classList.remove('active');
             UI.modalEditSession.classList.remove('active');
             UI.modalDeleteSession.classList.remove('active');
+            UI.modalRosterSlots.classList.remove('active');
+            UI.modalRosterAuto.classList.remove('active');
+            UI.modalRosterImport.classList.remove('active');
         };
 
         /* Ticket Modals */
@@ -7201,6 +7367,7 @@ Exported ${escapeHtml(formatZendeskTimestampWithYear(new Date().toISOString()))}
             const map = {
                 board: [UI.tabLinesBoard, UI.panelLinesBoard],
                 manage: [UI.tabLinesManage, UI.panelLinesManage],
+                roster: [UI.tabLinesRoster, UI.panelLinesRoster],
                 reports: [UI.tabLinesReports, UI.panelLinesReports]
             };
             Object.keys(map).forEach(key => {
@@ -7227,6 +7394,7 @@ Exported ${escapeHtml(formatZendeskTimestampWithYear(new Date().toISOString()))}
             renderMyLineStatus();
             renderLineBoard();
             renderLinesTable();
+            renderRoster();
             populateLineReportFilters();
             renderLinesReport();
         }
@@ -7593,6 +7761,726 @@ Exported ${escapeHtml(formatZendeskTimestampWithYear(new Date().toISOString()))}
                         <td${!s.checkOutAt ? ` data-line-start="${escapeHtml(s.checkInAt)}"` : ''}>${escapeHtml(formatLineDuration(lineSessionDuration(s, nowMs)))}</td>
                     </tr>`).join('')}</tbody></table>
                 </div>`;
+        }
+
+        /* --- CALL ASSIGNMENT ROSTER ---
+           A repeating weekly rota: for each day, each time slot, who is on which line.
+           Modelled on the team's existing spreadsheet (Hours | Line 1 | Line 2 | Line 3),
+           which is why the importer understands that exact shape.
+
+           Stored in the `lineRoster` document field as
+             { slots: [{id, label, start, end}], grid: { [day]: { [slotId]: { [lineId]: agentId } } } }
+           keyed by agent id and line id rather than by name, so renaming either doesn't
+           silently orphan half the rota. */
+
+        const ROSTER_DAYS = [
+            { idx: 1, name: 'Monday', short: 'Mon' },
+            { idx: 2, name: 'Tuesday', short: 'Tue' },
+            { idx: 3, name: 'Wednesday', short: 'Wed' },
+            { idx: 4, name: 'Thursday', short: 'Thu' },
+            { idx: 5, name: 'Friday', short: 'Fri' },
+            { idx: 6, name: 'Saturday', short: 'Sat' },
+            { idx: 0, name: 'Sunday', short: 'Sun' }
+        ];
+
+        // Seeded to the 9pm-6am shift this team actually works (see getTodayShiftWindow):
+        // 2+2+2+2+1 is nine hours, which is exactly that window, so the spreadsheet's
+        // "9 to 11 ... 5 to 6" reads as 9pm through 6am. Every slot is editable if that
+        // assumption is ever wrong for a given team.
+        const DEFAULT_ROSTER_SLOTS = [
+            { id: 'slot-1', label: '9 to 11', start: '21:00', end: '23:00' },
+            { id: 'slot-2', label: '11 to 1', start: '23:00', end: '01:00' },
+            { id: 'slot-3', label: '1 to 3', start: '01:00', end: '03:00' },
+            { id: 'slot-4', label: '3 to 5', start: '03:00', end: '05:00' },
+            { id: 'slot-5', label: '5 to 6', start: '05:00', end: '06:00' }
+        ];
+
+        let rosterDayView = 'today';
+        let pendingRosterImport = null;
+
+        function rosterData() {
+            const r = State.lineRoster || {};
+            return {
+                slots: Array.isArray(r.slots) && r.slots.length ? r.slots : DEFAULT_ROSTER_SLOTS,
+                grid: r.grid && typeof r.grid === 'object' ? r.grid : {}
+            };
+        }
+
+        function rosterSlotHours(slot) {
+            const [sh, sm] = String(slot.start || '0:0').split(':').map(Number);
+            const [eh, em] = String(slot.end || '0:0').split(':').map(Number);
+            let mins = (eh * 60 + em) - (sh * 60 + sm);
+            // A slot that ends "before" it starts has run past midnight, which is the norm
+            // on a night shift rather than an error.
+            if (mins <= 0) mins += 24 * 60;
+            return mins / 60;
+        }
+
+        function rosterAssignment(day, slotId, lineId) {
+            const { grid } = rosterData();
+            return ((grid[String(day)] || {})[slotId] || {})[lineId] || '';
+        }
+
+        // Which day the roster should open on. The shift starts at 9pm and runs past
+        // midnight, so before 6am "today" is still yesterday's rota -- the same rule the
+        // Dashboard's ticket counts use.
+        function currentRosterDay() {
+            const now = new Date();
+            const d = new Date(now);
+            if (now.getHours() < 6) d.setDate(d.getDate() - 1);
+            return d.getDay();
+        }
+
+        // The slot covering right now, or null outside the rostered hours.
+        function currentRosterSlot() {
+            const { slots } = rosterData();
+            const now = new Date();
+            const mins = now.getHours() * 60 + now.getMinutes();
+            return slots.find(s => {
+                const [sh, sm] = String(s.start).split(':').map(Number);
+                const [eh, em] = String(s.end).split(':').map(Number);
+                const start = sh * 60 + sm;
+                const end = eh * 60 + em;
+                return end > start ? (mins >= start && mins < end) : (mins >= start || mins < end);
+            }) || null;
+        }
+
+        async function saveRoster(apply) {
+            return mutateDocObject('lineRoster', live => {
+                const current = {
+                    slots: Array.isArray(live.slots) && live.slots.length ? live.slots : DEFAULT_ROSTER_SLOTS,
+                    grid: live.grid && typeof live.grid === 'object' ? live.grid : {}
+                };
+                const next = apply(JSON.parse(JSON.stringify(current)));
+                if (!next) return null;
+                next.updatedAt = new Date().toISOString();
+                next.updatedBy = currentUserEmail();
+                return next;
+            });
+        }
+
+        /* --- Manual editing --- */
+
+        window.setRosterCell = async function(day, slotId, lineId, agentId) {
+            if (!canManageLines()) return notify('You do not have permission to edit the roster.');
+
+            let clash = null;
+            const ok = await saveRoster(r => {
+                r.grid[day] = r.grid[day] || {};
+                r.grid[day][slotId] = r.grid[day][slotId] || {};
+
+                if (agentId) {
+                    // The same person cannot hold two lines in the same slot -- that is the
+                    // one rule a rota has to enforce, and it is easy to break by hand.
+                    const taken = Object.entries(r.grid[day][slotId])
+                        .find(([lid, aid]) => lid !== lineId && aid === agentId);
+                    if (taken) {
+                        const other = (State.lines || []).find(l => l.id === taken[0]);
+                        clash = `${agentNameById(agentId)} is already on ${other ? other.name : 'another line'} in that slot.`;
+                        return null;
+                    }
+                    r.grid[day][slotId][lineId] = agentId;
+                } else {
+                    delete r.grid[day][slotId][lineId];
+                }
+                return r;
+            });
+            if (clash) { renderRoster(); return notify(clash); }
+            if (!ok) return;
+            renderRoster();
+        };
+
+        function agentNameById(id) {
+            const a = State.agents.find(x => x.id === id);
+            return a ? a.name : '—';
+        }
+
+        /* --- Time slots --- */
+
+        window.openRosterSlotsModal = function() {
+            if (!canManageLines()) return notify('You do not have permission to edit the roster.');
+            renderRosterSlotList();
+            UI.modalRosterSlots.classList.add('active');
+        };
+
+        function renderRosterSlotList() {
+            const { slots } = rosterData();
+            UI.rosterSlotList.innerHTML = slots.map((s, i) => `<div class="roster-slot-row">
+                <span class="roster-slot-label">${escapeHtml(s.label)}</span>
+                <span class="roster-slot-time">${escapeHtml(s.start)} – ${escapeHtml(s.end)}</span>
+                <span class="roster-slot-hours">${rosterSlotHours(s)}h</span>
+                <button class="btn-icon" title="Move up"${i === 0 ? ' disabled' : ''} onclick="window.moveRosterSlot('${escapeHtml(s.id)}','up')"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="18 15 12 9 6 15"></polyline></svg></button>
+                <button class="btn-icon" title="Move down"${i === slots.length - 1 ? ' disabled' : ''} onclick="window.moveRosterSlot('${escapeHtml(s.id)}','down')"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg></button>
+                <button class="btn-icon danger" title="Remove slot" onclick="window.removeRosterSlot('${escapeHtml(s.id)}')"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"></path></svg></button>
+            </div>`).join('');
+        }
+
+        async function submitRosterSlot(e) {
+            e.preventDefault();
+            if (!canManageLines()) return notify('You do not have permission to edit the roster.');
+            const label = UI.rosterSlotLabel.value.trim();
+            const start = UI.rosterSlotStart.value;
+            const end = UI.rosterSlotEnd.value;
+            if (!label || !start || !end) return;
+            if (start === end) return notify('A slot has to be longer than zero minutes.');
+
+            const ok = await saveRoster(r => {
+                r.slots = r.slots.concat([{ id: crypto.randomUUID(), label, start, end }]);
+                return r;
+            });
+            if (!ok) return;
+            UI.rosterSlotLabel.value = '';
+            UI.rosterSlotStart.value = '';
+            UI.rosterSlotEnd.value = '';
+            renderRosterSlotList();
+            renderRoster();
+            notify(`Slot "${label}" added.`);
+        }
+
+        window.moveRosterSlot = async function(id, direction) {
+            const ok = await saveRoster(r => {
+                const i = r.slots.findIndex(s => s.id === id);
+                const j = direction === 'up' ? i - 1 : i + 1;
+                if (i < 0 || j < 0 || j >= r.slots.length) return null;
+                [r.slots[i], r.slots[j]] = [r.slots[j], r.slots[i]];
+                return r;
+            });
+            if (!ok) return;
+            renderRosterSlotList();
+            renderRoster();
+        };
+
+        window.removeRosterSlot = async function(id) {
+            let label = '';
+            const ok = await saveRoster(r => {
+                const slot = r.slots.find(s => s.id === id);
+                if (!slot) return null;
+                if (r.slots.length <= 1) return null;
+                label = slot.label;
+                r.slots = r.slots.filter(s => s.id !== id);
+                // Assignments for a slot that no longer exists would linger invisibly and
+                // reappear if a slot with the same id were ever recreated.
+                Object.keys(r.grid).forEach(day => { if (r.grid[day]) delete r.grid[day][id]; });
+                return r;
+            });
+            if (!ok) return notify('A roster needs at least one time slot.');
+            renderRosterSlotList();
+            renderRoster();
+            notify(`Slot "${label}" removed.`);
+        };
+
+        /* --- Auto-assign ---
+           Greedy fair-share: walk the week in order and give each open shift to whoever has
+           the fewest rostered hours so far. Ties are broken in favour of somebody who was
+           NOT on the previous slot, so people get a break between blocks whenever the roster
+           is big enough to allow it, and then by who was used least recently. Deterministic,
+           so pressing Generate twice on the same inputs gives the same rota. */
+
+        function rosterAgentPool(mode) {
+            const agents = State.agents || [];
+            if (mode === 'all') return agents.slice();
+            const support = agents.filter(a => a.role === 'support');
+            if (mode === 'support') return support;
+            return support.filter(a => a.isAvailable !== false);
+        }
+
+        function autoAssignRoster(options) {
+            const { slots, grid } = rosterData();
+            const lines = sortedLines().filter(l => l.isActive !== false);
+            const pool = rosterAgentPool(options.pool);
+            if (pool.length === 0 || lines.length === 0 || slots.length === 0) {
+                return { grid: null, reason: !pool.length ? 'No agents match that selection.' : 'Set up at least one line and one time slot first.' };
+            }
+
+            const days = options.scope === 'day' ? [options.day] : ROSTER_DAYS.map(d => d.idx);
+            const next = JSON.parse(JSON.stringify(grid));
+
+            const hours = new Map(pool.map(a => [a.id, 0]));
+            const lastUsed = new Map(pool.map(a => [a.id, -1]));
+
+            // Existing assignments still count towards someone's load when only filling
+            // gaps, otherwise "fair" would ignore everything already on the board.
+            if (options.mode === 'fill') {
+                Object.keys(next).forEach(day => {
+                    Object.keys(next[day] || {}).forEach(slotId => {
+                        const slot = slots.find(s => s.id === slotId);
+                        if (!slot) return;
+                        Object.values(next[day][slotId] || {}).forEach(agentId => {
+                            if (hours.has(agentId)) hours.set(agentId, hours.get(agentId) + rosterSlotHours(slot));
+                        });
+                    });
+                });
+            }
+
+            let tick = 0;
+            let filled = 0;
+            days.forEach(day => {
+                const dayKey = String(day);
+                next[dayKey] = next[dayKey] || {};
+                if (options.mode === 'replace') next[dayKey] = {};
+
+                slots.forEach((slot, slotIndex) => {
+                    next[dayKey][slot.id] = next[dayKey][slot.id] || {};
+                    const cell = next[dayKey][slot.id];
+                    const previous = slotIndex > 0 ? (next[dayKey][slots[slotIndex - 1].id] || {}) : {};
+                    const previousAgents = new Set(Object.values(previous));
+                    const takenThisSlot = new Set(Object.values(cell));
+
+                    lines.forEach(line => {
+                        if (cell[line.id] && options.mode === 'fill') return;
+
+                        const candidates = pool
+                            .filter(a => !takenThisSlot.has(a.id))
+                            .sort((a, b) => {
+                                const ha = hours.get(a.id), hb = hours.get(b.id);
+                                if (ha !== hb) return ha - hb;
+                                const ra = previousAgents.has(a.id) ? 1 : 0;
+                                const rb = previousAgents.has(b.id) ? 1 : 0;
+                                if (ra !== rb) return ra - rb;
+                                return lastUsed.get(a.id) - lastUsed.get(b.id);
+                            });
+
+                        // Fewer people than lines in this slot -- leave it empty rather than
+                        // double-booking somebody, and let the UI show the gap.
+                        if (candidates.length === 0) { delete cell[line.id]; return; }
+
+                        const pick = candidates[0];
+                        cell[line.id] = pick.id;
+                        takenThisSlot.add(pick.id);
+                        hours.set(pick.id, hours.get(pick.id) + rosterSlotHours(slot));
+                        lastUsed.set(pick.id, tick++);
+                        filled++;
+                    });
+                });
+            });
+
+            return { grid: next, filled, poolSize: pool.length };
+        }
+
+        window.openRosterAutoModal = function() {
+            if (!canManageLines()) return notify('You do not have permission to edit the roster.');
+            updateRosterPoolHint();
+            UI.modalRosterAuto.classList.add('active');
+        };
+
+        function updateRosterPoolHint() {
+            const pool = rosterAgentPool(UI.rosterAutoPool.value);
+            const lines = sortedLines().filter(l => l.isActive !== false).length;
+            const { slots } = rosterData();
+            UI.rosterAutoPoolHint.innerText = pool.length === 0
+                ? 'Nobody matches that selection.'
+                : `${pool.length} agent(s): ${pool.map(a => a.name).join(', ')}`
+                  + (lines > pool.length ? ` — fewer people than the ${lines} open lines, so some slots will be left empty.` : '');
+        }
+
+        async function submitRosterAuto(e) {
+            e.preventDefault();
+            if (!canManageLines()) return notify('You do not have permission to edit the roster.');
+
+            const options = {
+                scope: UI.rosterAutoScope.value,
+                mode: UI.rosterAutoMode.value,
+                pool: UI.rosterAutoPool.value,
+                day: rosterSelectedDay()
+            };
+            const result = autoAssignRoster(options);
+            if (!result.grid) return notify(result.reason);
+
+            const ok = await saveRoster(r => { r.grid = result.grid; return r; });
+            if (!ok) return;
+
+            logActivity('Call Lines', `The call roster was auto-assigned (${escapeHtml(options.scope === 'day' ? 'one day' : 'whole week')}, ${escapeHtml(options.mode === 'fill' ? 'gaps only' : 'replaced')}, ${result.poolSize} agent(s))`);
+            State.commit(['activities']);
+            window.closeModals();
+            renderRoster();
+            notify(`Roster generated — ${result.filled} shift(s) assigned.`);
+        }
+
+        /* --- Roster rendering --- */
+
+        function rosterSelectedDay() {
+            const v = UI.rosterDaySelect ? UI.rosterDaySelect.value : 'today';
+            if (v === 'all') return currentRosterDay();
+            if (v === 'today' || v === '') return currentRosterDay();
+            return Number(v);
+        }
+
+        function populateRosterDaySelect() {
+            if (!UI.rosterDaySelect) return;
+            const keep = UI.rosterDaySelect.value || 'today';
+            const today = currentRosterDay();
+            UI.rosterDaySelect.innerHTML =
+                `<option value="today">Today (${escapeHtml((ROSTER_DAYS.find(d => d.idx === today) || {}).name || '')})</option>`
+                + ROSTER_DAYS.map(d => `<option value="${d.idx}">${escapeHtml(d.name)}</option>`).join('')
+                + `<option value="all">Whole week</option>`;
+            UI.rosterDaySelect.value = keep;
+            if (!UI.rosterDaySelect.value) UI.rosterDaySelect.value = 'today';
+        }
+
+        function renderRoster() {
+            if (!UI.rosterGridWrap) return;
+            populateRosterDaySelect();
+            renderRosterNowStrip();
+
+            const view = UI.rosterDaySelect.value;
+            const days = view === 'all' ? ROSTER_DAYS.map(d => d.idx) : [rosterSelectedDay()];
+            UI.rosterGridWrap.innerHTML = days.map(renderRosterDayTable).join('');
+
+            renderRosterLoad();
+        }
+
+        function renderRosterDayTable(day) {
+            const { slots } = rosterData();
+            const lines = sortedLines();
+            const dayMeta = ROSTER_DAYS.find(d => d.idx === day) || { name: 'Day' };
+            const editable = canManageLines();
+            const isToday = day === currentRosterDay();
+            const nowSlot = isToday ? currentRosterSlot() : null;
+
+            if (lines.length === 0) {
+                return `<div class="panel"><div class="panel-body" style="color:var(--text-muted);">No call lines yet — create them in Manage Lines and they become the roster's columns.</div></div>`;
+            }
+
+            const pool = State.agents.filter(a => a.role === 'support' || rosterDayUsesAgent(day, a.id));
+
+            const rows = slots.map(slot => {
+                const live = nowSlot && nowSlot.id === slot.id;
+                return `<tr${live ? ' class="roster-row-now"' : ''}>
+                    <td style="white-space:nowrap;">
+                        <strong>${escapeHtml(slot.label)}</strong>
+                        ${live ? '<span class="badge" style="color:#10b981; background:rgba(16,185,129,0.15); margin-left:0.4rem;">Now</span>' : ''}
+                        <div class="roster-slot-sub">${escapeHtml(slot.start)}–${escapeHtml(slot.end)}</div>
+                    </td>
+                    <td style="white-space:nowrap; color:var(--text-muted);">${rosterSlotHours(slot)}h</td>
+                    ${lines.map(line => {
+                        const agentId = rosterAssignment(day, slot.id, line.id);
+                        return `<td>${editable
+                            ? `<select class="roster-cell" onchange="window.setRosterCell(${day}, '${escapeHtml(slot.id)}', '${escapeHtml(line.id)}', this.value)">
+                                    <option value="">—</option>
+                                    ${pool.map(a => `<option value="${escapeHtml(a.id)}"${a.id === agentId ? ' selected' : ''}>${escapeHtml(a.name)}</option>`).join('')}
+                               </select>`
+                            : `<span class="${agentId ? '' : 'roster-empty'}">${agentId ? escapeHtml(agentNameById(agentId)) : 'Unassigned'}</span>`
+                        }</td>`;
+                    }).join('')}
+                </tr>`;
+            }).join('');
+
+            return `<div class="panel" style="margin-bottom:1rem;">
+                <div class="panel-header">
+                    <h2>${escapeHtml(dayMeta.name)}${isToday ? ' — today' : ''}</h2>
+                </div>
+                <div class="table-scroll">
+                    <table class="roster-table">
+                        <thead><tr>
+                            <th>Hours</th><th>Length</th>
+                            ${lines.map(l => `<th>${escapeHtml(l.name)}${l.isActive === false ? ' <span style="color:var(--text-muted); font-weight:400;">(closed)</span>' : ''}</th>`).join('')}
+                        </tr></thead>
+                        <tbody>${rows}</tbody>
+                    </table>
+                </div>
+            </div>`;
+        }
+
+        // Somebody who has left the support role but is still on the rota must stay in that
+        // cell's dropdown, or opening the day would silently blank their shift.
+        function rosterDayUsesAgent(day, agentId) {
+            const { grid } = rosterData();
+            const dayGrid = grid[String(day)] || {};
+            return Object.values(dayGrid).some(slot => Object.values(slot || {}).includes(agentId));
+        }
+
+        // The point of a rota is knowing who should be on the phones right now -- and this is
+        // the one place the plan can be checked against what is actually happening, since the
+        // live board knows who is really checked in.
+        function renderRosterNowStrip() {
+            if (!UI.rosterNowStrip) return;
+            const slot = currentRosterSlot();
+            const day = currentRosterDay();
+            const lines = sortedLines();
+
+            if (!slot) {
+                UI.rosterNowStrip.innerHTML = `<span style="color:var(--text-muted); font-size:0.9rem;">Outside the rostered hours right now.</span>`;
+                return;
+            }
+
+            const open = openLineSessions();
+            const cards = lines.map(line => {
+                const rosteredId = rosterAssignment(day, slot.id, line.id);
+                const rosteredName = rosteredId ? agentNameById(rosteredId) : null;
+                const actual = open.find(s => s.lineId === line.id);
+                let state = 'ok', note = '';
+                if (!rosteredName && actual) { state = 'extra'; note = `${actual.agentName} is on, not rostered`; }
+                else if (rosteredName && !actual) { state = 'missing'; note = `${rosteredName} is rostered, not checked in`; }
+                else if (rosteredName && actual && actual.agentId !== rosteredId) { state = 'swap'; note = `${actual.agentName} covering for ${rosteredName}`; }
+                else if (rosteredName && actual) { note = `${rosteredName} on as rostered`; }
+                else { state = 'empty'; note = 'Nobody rostered or on'; }
+                return `<div class="roster-now-card ${state}">
+                    <div class="roster-now-line">${escapeHtml(line.name)}</div>
+                    <div class="roster-now-note">${escapeHtml(note)}</div>
+                </div>`;
+            }).join('');
+
+            const me = myLineIdentity();
+            const mineNow = me ? lines.filter(l => rosterAssignment(day, slot.id, l.id) === me.agentId).map(l => l.name) : [];
+            const mineBanner = mineNow.length
+                ? `<div class="roster-you">You are rostered on <strong>${escapeHtml(mineNow.join(', '))}</strong> this slot.${myOpenLineSession() ? '' : ' You are not checked in yet.'}</div>`
+                : '';
+
+            UI.rosterNowStrip.innerHTML = `<div class="roster-now-head">Right now — ${escapeHtml(slot.label)} (${escapeHtml(slot.start)}–${escapeHtml(slot.end)})</div>
+                <div class="roster-now-grid">${cards}</div>${mineBanner}`;
+        }
+
+        function rosterLoadTotals() {
+            const { slots, grid } = rosterData();
+            const byAgent = new Map();
+            ROSTER_DAYS.forEach(d => {
+                const dayGrid = grid[String(d.idx)] || {};
+                slots.forEach(slot => {
+                    const cell = dayGrid[slot.id] || {};
+                    Object.values(cell).forEach(agentId => {
+                        if (!agentId) return;
+                        if (!byAgent.has(agentId)) byAgent.set(agentId, { slots: 0, hours: 0, days: new Set() });
+                        const rec = byAgent.get(agentId);
+                        rec.slots += 1;
+                        rec.hours += rosterSlotHours(slot);
+                        rec.days.add(d.short);
+                    });
+                });
+            });
+            return byAgent;
+        }
+
+        function renderRosterLoad() {
+            if (!UI.tableRosterLoad) return;
+            const byAgent = rosterLoadTotals();
+            const rows = [...byAgent.entries()].sort((a, b) => b[1].hours - a[1].hours);
+            const total = rows.reduce((sum, [, r]) => sum + r.hours, 0);
+
+            if (rows.length === 0) {
+                UI.rosterLoadSummary.innerText = '';
+                UI.tableRosterLoad.innerHTML = `<tr><td colspan="5" style="text-align:center; color: var(--text-muted); padding: 2rem;">Nothing rostered yet. Use Auto-assign, or fill the grid by hand.</td></tr>`;
+                return;
+            }
+
+            // The spread between the busiest and quietest person is the number that tells you
+            // whether the rota is actually fair, so it is stated rather than left to be eyeballed.
+            const spread = rows[0][1].hours - rows[rows.length - 1][1].hours;
+            UI.rosterLoadSummary.innerText = `${rows.length} agent(s) · ${total}h rostered · ${spread === 0 ? 'evenly split' : `${spread}h between busiest and quietest`}`;
+
+            UI.tableRosterLoad.innerHTML = rows.map(([agentId, r]) => `<tr>
+                <td><strong>${escapeHtml(agentNameById(agentId))}</strong></td>
+                <td>${r.slots}</td>
+                <td>${r.hours}h</td>
+                <td>${total > 0 ? Math.round((r.hours / total) * 100) : 0}%</td>
+                <td style="font-size:0.8rem; color:var(--text-muted);">${escapeHtml([...r.days].join(', '))}</td>
+            </tr>`).join('');
+        }
+
+        /* --- Import from the team's existing spreadsheet ---
+           Understands the layout they already keep it in: a day name on its own row, then a
+           header row of Hours | hours | Line 1 | Line 2 | ..., then one row per slot. Names
+           are matched against the agent roster; anything unmatched is reported rather than
+           quietly dropped, because a typo in the sheet would otherwise just vanish. */
+
+        function parseCsvRows(text) {
+            const rows = [];
+            let row = [], field = '', quoted = false;
+            for (let i = 0; i < text.length; i++) {
+                const c = text[i];
+                if (quoted) {
+                    if (c === '"') {
+                        if (text[i + 1] === '"') { field += '"'; i++; }
+                        else quoted = false;
+                    } else field += c;
+                } else if (c === '"') quoted = true;
+                else if (c === ',') { row.push(field); field = ''; }
+                else if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
+                else if (c !== '\r') field += c;
+            }
+            if (field.length || row.length) { row.push(field); rows.push(row); }
+            return rows;
+        }
+
+        function matchAgentByName(raw) {
+            const name = String(raw || '').trim();
+            if (!name) return null;
+            const lower = name.toLowerCase();
+            const agents = State.agents || [];
+            return agents.find(a => (a.name || '').trim().toLowerCase() === lower)
+                || agents.find(a => (a.name || '').trim().toLowerCase().split(/\s+/)[0] === lower)
+                || agents.find(a => (a.name || '').trim().toLowerCase().startsWith(lower + ' '))
+                || null;
+        }
+
+        function parseRosterCsv(text) {
+            const rows = parseCsvRows(text);
+            const { slots } = rosterData();
+            const lines = sortedLines();
+            const dayByName = new Map(ROSTER_DAYS.map(d => [d.name.toLowerCase(), d.idx]));
+
+            const grid = {};
+            const unmatched = new Map();
+            const unknownSlots = new Set();
+            let assigned = 0, currentDay = null, lineCols = [];
+
+            rows.forEach(cells => {
+                const joined = cells.map(c => String(c || '').trim());
+                const dayHit = joined.find(c => dayByName.has(c.toLowerCase()));
+                if (dayHit) { currentDay = dayByName.get(dayHit.toLowerCase()); lineCols = []; return; }
+
+                // Header row: remember which column each line lives in, matching by the line's
+                // own name so a sheet with different column order still imports correctly.
+                if (joined[0] && joined[0].toLowerCase() === 'hours') {
+                    lineCols = [];
+                    joined.forEach((cell, idx) => {
+                        const line = lines.find(l => (l.name || '').trim().toLowerCase() === cell.toLowerCase());
+                        if (line) lineCols.push({ idx, line });
+                    });
+                    return;
+                }
+
+                if (currentDay === null || lineCols.length === 0) return;
+                const label = joined[0];
+                if (!label) return;
+                const slot = slots.find(s => s.label.toLowerCase() === label.toLowerCase());
+                if (!slot) { unknownSlots.add(label); return; }
+
+                lineCols.forEach(({ idx, line }) => {
+                    const raw = joined[idx];
+                    if (!raw) return;
+                    const agent = matchAgentByName(raw);
+                    if (!agent) { unmatched.set(raw, (unmatched.get(raw) || 0) + 1); return; }
+                    grid[String(currentDay)] = grid[String(currentDay)] || {};
+                    grid[String(currentDay)][slot.id] = grid[String(currentDay)][slot.id] || {};
+                    grid[String(currentDay)][slot.id][line.id] = agent.id;
+                    assigned++;
+                });
+            });
+
+            return { grid, assigned, unmatched, unknownSlots, days: Object.keys(grid).length };
+        }
+
+        function handleRosterImportFile(e) {
+            const file = e.target.files && e.target.files[0];
+            e.target.value = '';
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = () => {
+                try {
+                    pendingRosterImport = parseRosterCsv(String(reader.result));
+                    showRosterImportReport();
+                } catch (err) {
+                    console.error('Roster import failed', err);
+                    notify('That file could not be read as a roster CSV.');
+                }
+            };
+            reader.onerror = () => notify('That file could not be read.');
+            reader.readAsText(file);
+        }
+
+        function showRosterImportReport() {
+            const r = pendingRosterImport;
+            UI.rosterImportSummary.innerText = `${r.assigned} shift(s) across ${r.days} day(s) were read from the file. Nothing is saved until you apply it.`;
+
+            const problems = [];
+            if (r.unmatched.size > 0) {
+                problems.push(`<div class="roster-import-warn"><strong>${r.unmatched.size} name(s) didn't match anyone on the agent roster</strong> and will be left unassigned:
+                    <ul>${[...r.unmatched.entries()].map(([name, n]) => `<li>${escapeHtml(name)} <span style="color:var(--text-muted);">— ${n} shift(s)</span></li>`).join('')}</ul>
+                    Add them under Agents (or fix the spelling in the sheet) and import again.</div>`);
+            }
+            if (r.unknownSlots.size > 0) {
+                problems.push(`<div class="roster-import-warn"><strong>${r.unknownSlots.size} time slot(s) in the file aren't set up here</strong> and were skipped: ${escapeHtml([...r.unknownSlots].join(', '))}.
+                    Add them under Time Slots first if you want them imported.</div>`);
+            }
+            if (r.assigned === 0) {
+                problems.push(`<div class="roster-import-warn">Nothing could be imported. The file needs a day name on its own row, then a header row starting with <em>Hours</em> whose other columns match your line names.</div>`);
+            }
+            UI.rosterImportReport.innerHTML = problems.join('') || `<div class="roster-import-ok">Everything in the file matched an agent and a time slot.</div>`;
+            UI.btnRosterImportApply.disabled = r.assigned === 0;
+            UI.modalRosterImport.classList.add('active');
+        }
+
+        async function applyRosterImport() {
+            if (!pendingRosterImport || !canManageLines()) return;
+            const r = pendingRosterImport;
+            // Imported days replace what was there, days absent from the file are untouched --
+            // so a sheet covering only Mon-Fri doesn't wipe a weekend rota.
+            const ok = await saveRoster(roster => {
+                Object.keys(r.grid).forEach(day => { roster.grid[day] = r.grid[day]; });
+                return roster;
+            });
+            if (!ok) return;
+            logActivity('Call Lines', `The call roster was imported from a file — ${r.assigned} shift(s) across ${r.days} day(s)`);
+            State.commit(['activities']);
+            pendingRosterImport = null;
+            window.closeModals();
+            renderRoster();
+            notify(`Roster imported — ${r.assigned} shift(s).`);
+        }
+
+        /* --- Roster exports --- */
+
+        function rosterExportRows() {
+            const { slots } = rosterData();
+            const lines = sortedLines();
+            const rows = [];
+            ROSTER_DAYS.forEach(d => {
+                slots.forEach(slot => {
+                    rows.push([
+                        d.name, slot.label, `${slot.start}-${slot.end}`, String(rosterSlotHours(slot)),
+                        ...lines.map(l => { const id = rosterAssignment(d.idx, slot.id, l.id); return id ? agentNameById(id) : ''; })
+                    ]);
+                });
+            });
+            return rows;
+        }
+
+        function rosterExportHeaders() {
+            return ['Day', 'Slot', 'Time', 'Hours', ...sortedLines().map(l => l.name)];
+        }
+
+        function exportRosterCsv() {
+            const escapeCell = v => `"${String(v).replace(/"/g, '""')}"`;
+            const out = [rosterExportHeaders().map(escapeCell).join(',')];
+            rosterExportRows().forEach(r => out.push(r.map(escapeCell).join(',')));
+            triggerDownload(new Blob(['﻿' + out.join('\r\n')], { type: 'text/csv;charset=utf-8;' }), `Call_Roster_${getLocalDateString()}.csv`);
+            notify('Roster CSV exported.');
+        }
+
+        function exportRosterPdf() {
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF({ orientation: 'landscape' });
+            doc.setFontSize(16);
+            doc.text('Call Assignment Roster', 14, 15);
+            doc.setFontSize(9);
+            doc.setTextColor(100);
+            doc.text(`Exported ${formatLineClock(new Date().toISOString())}`, 14, 22);
+            doc.autoTable({
+                startY: 28,
+                head: [rosterExportHeaders()],
+                body: rosterExportRows(),
+                theme: 'grid',
+                styles: { fontSize: 8, cellPadding: 2 },
+                headStyles: { fillColor: [79, 70, 229] }
+            });
+            doc.save(`Call_Roster_${getLocalDateString()}.pdf`);
+            notify('Roster PDF exported.');
+        }
+
+        function exportRosterDoc() {
+            const headerHtml = rosterExportHeaders().map(h => `<th style="background:#4f46e5; color:#fff; text-align:left; padding:6px; border:1px solid #999;">${escapeHtml(h)}</th>`).join('');
+            const bodyHtml = rosterExportRows().map(row =>
+                `<tr>${row.map(cell => `<td style="padding:6px; border:1px solid #999; font-size:10pt;">${escapeHtml(String(cell))}</td>`).join('')}</tr>`
+            ).join('');
+            const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+<head><meta charset="utf-8"><title>Call Assignment Roster</title></head>
+<body style="font-family: Calibri, Arial, sans-serif;">
+<h2>Call Assignment Roster</h2>
+<p style="font-size:10pt; color:#555;">Exported ${escapeHtml(formatLineClock(new Date().toISOString()))}</p>
+<table style="border-collapse:collapse; width:100%;"><thead><tr>${headerHtml}</tr></thead><tbody>${bodyHtml}</tbody></table>
+</body></html>`;
+            triggerDownload(new Blob(['﻿' + html], { type: 'application/msword' }), `Call_Roster_${getLocalDateString()}.doc`);
+            notify('Roster Word document exported.');
         }
         /* --- Reporting --- */
 

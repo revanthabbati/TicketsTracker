@@ -284,6 +284,40 @@ hr.divider { border: 0; border-top: 1px solid var(--border-light); margin: 1.5re
 .line-chart-box.short { height: 260px; }
 /* The row highlighted in Manage Lines is the slice currently shown on the Dashboard. */
 .line-on-dash td:first-child { box-shadow: inset 3px 0 0 var(--brand-purple); }
+/* --- CALL ASSIGNMENT ROSTER --- */
+.roster-table th, .roster-table td { vertical-align: middle; }
+.roster-slot-sub { font-size: 0.72rem; color: var(--text-muted); font-weight: 400; margin-top: 0.15rem; }
+/* The slot covering right now, so the current shift is findable at a glance in a long table. */
+.roster-row-now { background: rgba(99, 102, 241, 0.08); }
+.roster-row-now td:first-child { box-shadow: inset 3px 0 0 var(--brand-blue); }
+.roster-cell { width: 100%; min-width: 130px; padding: 0.45rem 0.55rem; background: var(--bg-input); border: 1px solid var(--border-light); color: var(--text-main); border-radius: 6px; font-size: 0.85rem; }
+.roster-cell:focus { border-color: var(--brand-purple); outline: none; }
+.roster-empty { color: var(--text-muted); font-style: italic; }
+
+.roster-now-head { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); font-weight: 600; margin-bottom: 0.75rem; }
+.roster-now-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 0.75rem; }
+.roster-now-card { background: var(--bg-input); border: 1px solid var(--border-light); border-left: 3px solid var(--border-light); border-radius: var(--radius-md); padding: 0.7rem 0.85rem; }
+/* Plan versus reality: green where the rota is being followed, amber where somebody is
+   covering for someone else, red where a rostered line has nobody on it. */
+.roster-now-card.ok { border-left-color: #10b981; }
+.roster-now-card.swap { border-left-color: #f59e0b; }
+.roster-now-card.missing { border-left-color: #f43f5e; }
+.roster-now-card.extra { border-left-color: #8b5cf6; }
+.roster-now-card.empty { border-left-color: var(--text-muted); opacity: 0.7; }
+.roster-now-line { font-weight: 700; font-size: 0.9rem; }
+.roster-now-note { font-size: 0.78rem; color: var(--text-muted); margin-top: 0.2rem; }
+.roster-you { margin-top: 0.9rem; padding-top: 0.75rem; border-top: 1px solid var(--border-light); font-size: 0.85rem; color: var(--brand-purple); font-weight: 600; }
+
+.roster-slot-row { display: flex; align-items: center; gap: 0.6rem; padding: 0.5rem 0; border-bottom: 1px solid var(--border-light); }
+.roster-slot-row:last-child { border-bottom: none; }
+.roster-slot-label { font-weight: 600; flex: 1; }
+.roster-slot-time { color: var(--text-muted); font-size: 0.82rem; }
+.roster-slot-hours { color: var(--text-muted); font-size: 0.78rem; min-width: 28px; text-align: right; }
+
+.roster-import-warn { background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: var(--radius-md); padding: 0.85rem 1rem; font-size: 0.85rem; line-height: 1.5; margin-bottom: 0.75rem; }
+.roster-import-warn ul { margin: 0.5rem 0 0.5rem 1.2rem; }
+.roster-import-ok { background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: var(--radius-md); padding: 0.85rem 1rem; font-size: 0.85rem; }
+
 /* --- RESPONSIVE / MOBILE ---
    The app was built desktop-only: a fixed 260px sidebar, body{overflow:hidden}, two-column
    grids and wide tables with no horizontal escape. On a 375px phone the sidebar alone ate
@@ -372,6 +406,8 @@ hr.divider { border: 0; border-top: 1px solid var(--border-light); margin: 1.5re
     .stat-card { flex: 1 1 100%; }
     .line-grid { grid-template-columns: 1fr; }
     .dash-line-grid { grid-template-columns: 1fr; }
+    .roster-now-grid { grid-template-columns: 1fr; }
+    .roster-table { min-width: 620px; }
     .line-chart-box { height: 260px; }
     .line-chart-box.short { height: 230px; }
     .page-title h1 { font-size: 1.3rem; }

@@ -71,7 +71,7 @@ clicking through the app because they need two people acting at once.
 node tools/lines-check.js
 ```
 
-Runs 83 assertions covering:
+Runs 112 assertions covering:
 
 - **seat capacity under a race** — two agents taking the last seat at the same instant, with a
   second client deliberately committing mid-transaction. A line must never exceed its capacity.
@@ -94,6 +94,12 @@ Runs 83 assertions covering:
   records can be.
 - **report access** — that a plain user cannot view call-line reports, that the permission
   grants it, and that managing lines implies it.
+- **the call roster** — slot hours across midnight; that auto-assign never puts one person on
+  two lines in the same slot, spreads hours to within an hour of even, and is deterministic, so
+  regenerating doesn't reshuffle everybody for no reason; that a team smaller than the number of
+  lines leaves slots empty rather than double-booking; that fill-gaps changes nothing existing;
+  and that importing the team's spreadsheet reproduces it exactly, reports unmatched names
+  rather than dropping them, and leaves days absent from the file untouched.
 - that writes touch **only** the fields they should and leave `users` and `tickets`
   byte-identical.
 

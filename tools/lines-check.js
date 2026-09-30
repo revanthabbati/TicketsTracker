@@ -56,7 +56,7 @@ async function runTransaction(db, fn) {
 }
 
 const notices = [];
-const State = { lines: [], lineSessions: [], lineSettings: {}, agents: [], currentUser: null, activities: [], commit: async () => {} };
+const State = { lines: [], lineSessions: [], lineSettings: {}, lineRoster: {}, agents: [], currentUser: null, activities: [], commit: async () => {} };
 const UI = {};
 const globals = {
     runTransaction, db: {}, docRef, State, UI,
@@ -80,6 +80,8 @@ const factory = new Function(...Object.keys(globals), `
              openLineSessions, canManageLines, myLineIdentity, LINE_SESSION_CAP,
              setAgentPresence, isAgentAway, agentPresence, PRESENCE_AWAY,
              dashboardLineCount, dashboardLines, canViewLineReports, mutateDocObject,
+             autoAssignRoster, rosterSlotHours, parseRosterCsv, matchAgentByName,
+             rosterLoadTotals, rosterData, DEFAULT_ROSTER_SLOTS, ROSTER_DAYS,
              moveLine: window.moveLine,
              lineCheckIn: window.lineCheckIn, lineCheckOut: window.lineCheckOut };
 `);
@@ -325,6 +327,121 @@ const C = { agentId: 'a3', agentName: 'Cara', userEmail: 'cara@x.com', linked: t
     State.currentUser = null;
     check('signed out cannot view', L.canViewLineReports() === false);
 
+
+    console.log('\n19. Roster slot hours, including slots that cross midnight');
+    check('a normal slot', L.rosterSlotHours({ start: '21:00', end: '23:00' }) === 2);
+    check('a slot crossing midnight', L.rosterSlotHours({ start: '23:00', end: '01:00' }) === 2);
+    check('the short last slot', L.rosterSlotHours({ start: '05:00', end: '06:00' }) === 1);
+    check('the seeded shift totals 9h (matches the team sheet)',
+        L.DEFAULT_ROSTER_SLOTS.reduce((s, x) => s + L.rosterSlotHours(x), 0) === 9);
+
+    console.log('\n20. Auto-assign never double-books anybody in one slot');
+    const RLINES = [
+        { id: 'L1', name: 'Line 1', order: 0, isActive: true },
+        { id: 'L2', name: 'Line 2', order: 1, isActive: true },
+        { id: 'L3', name: 'Line 3', order: 2, isActive: true }
+    ];
+    const ROSTER_AGENTS = ['Ram', 'Srinath', 'Akash', 'Rahul', 'Ganesh', 'Ashok', 'Tarun', 'Krishna']
+        .map((n, i) => ({ id: 'r' + i, name: n, role: 'support', isAvailable: true, zendeskEmail: n.toLowerCase() + '@x.com' }));
+    reset(RLINES, []);
+    State.agents = ROSTER_AGENTS;
+    State.lineRoster = {};
+    State.currentUser = { role: 'admin', permissions: {} };
+
+    let auto = L.autoAssignRoster({ scope: 'week', mode: 'replace', pool: 'support', day: 1 });
+    check('a grid came back', !!auto.grid, JSON.stringify(auto.reason));
+    const slotIds = L.DEFAULT_ROSTER_SLOTS.map(s => s.id);
+    let duplicateSlots = 0, cells = 0;
+    Object.keys(auto.grid).forEach(d => slotIds.forEach(sid => {
+        const vals = Object.values(auto.grid[d][sid] || {}).filter(Boolean);
+        cells += vals.length;
+        if (new Set(vals).size !== vals.length) duplicateSlots++;
+    }));
+    check('every day/slot/line cell filled (7x5x3)', cells === 105, String(cells));
+    check('nobody holds two lines in the same slot', duplicateSlots === 0, duplicateSlots + ' clashing slots');
+
+    console.log('\n21. Auto-assign spreads the hours fairly');
+    State.lineRoster = { slots: L.DEFAULT_ROSTER_SLOTS, grid: auto.grid };
+    let load = [...L.rosterLoadTotals().values()].map(r => r.hours).sort((a, b) => a - b);
+    check('everyone was used', load.length === 8, String(load.length));
+    check('busiest and quietest differ by at most 1h', load[load.length - 1] - load[0] <= 1, load.join(','));
+    // Deterministic: the same inputs must give the same rota, or "regenerate" would reshuffle
+    // people's shifts for no reason every time someone pressed the button.
+    State.lineRoster = {};
+    const again = L.autoAssignRoster({ scope: 'week', mode: 'replace', pool: 'support', day: 1 });
+    check('the same inputs give the same rota', JSON.stringify(again.grid) === JSON.stringify(auto.grid));
+
+    console.log('\n22. Auto-assign leaves slots empty rather than double-booking a small team');
+    State.agents = ROSTER_AGENTS.slice(0, 2);   // 2 people, 3 lines
+    State.lineRoster = {};
+    const thin = L.autoAssignRoster({ scope: 'day', mode: 'replace', pool: 'support', day: 1 });
+    const mondaySlot = thin.grid['1'][slotIds[0]];
+    check('only as many lines as people are filled', Object.keys(mondaySlot).length === 2, JSON.stringify(mondaySlot));
+    check('and those two are different people', new Set(Object.values(mondaySlot)).size === 2);
+    State.agents = ROSTER_AGENTS;
+
+    console.log('\n23. Fill-gaps mode leaves existing assignments alone');
+    State.lineRoster = { slots: L.DEFAULT_ROSTER_SLOTS, grid: JSON.parse(JSON.stringify(auto.grid)) };
+    delete State.lineRoster.grid['1'][slotIds[0]].L1;
+    delete State.lineRoster.grid['3'][slotIds[2]].L3;
+    const filled = L.autoAssignRoster({ scope: 'week', mode: 'fill', pool: 'support', day: 1 });
+    let touched = 0, gapsClosed = 0;
+    Object.keys(auto.grid).forEach(d => slotIds.forEach(sid => ['L1', 'L2', 'L3'].forEach(l => {
+        const before = (State.lineRoster.grid[d][sid] || {})[l] || '';
+        const after = (filled.grid[d][sid] || {})[l] || '';
+        if (before && after !== before) touched++;
+        if (!before && after) gapsClosed++;
+    })));
+    check('no existing assignment was changed', touched === 0, String(touched));
+    check('both gaps were filled', gapsClosed === 2, String(gapsClosed));
+
+    console.log('\n24. Importing the team spreadsheet');
+    State.lineRoster = { slots: L.DEFAULT_ROSTER_SLOTS, grid: {} };
+    const SHEET = [
+        ',Monday,,,,',
+        'Hours,hours,Line 1,Line 2,Line 3,',
+        '9 to 11,2,Ram,Srinath,Akash,',
+        '11 to 1,2,Rahul,Ganesh,Ashok,',
+        '1 to 3,2,Srinath,Ram,Tarun,',
+        '3 to 5,2,Akash,Krishna,Ganesh,',
+        '5 to 6,1,Ram,Srinath,Rahul,',
+        ',,,,,',
+        ' ,Tuesday,,,,Exception',
+        'Hours,hours,Line 1,Line 2,Line 3,',
+        '9 to 11,2,Ram,Tarun,Rahul,',
+        '3 to 5,2,Krishna,Ashok,Rhul,'
+    ].join('\r\n');
+    const imported = L.parseRosterCsv(SHEET);
+    check('Monday and Tuesday were read', imported.days === 2, String(imported.days));
+    check('Monday row 1 is Ram | Srinath | Akash',
+        ['L1', 'L2', 'L3'].map(l => imported.grid['1'][slotIds[0]][l]).join(',') === 'r0,r1,r2',
+        JSON.stringify(imported.grid['1'][slotIds[0]]));
+    check('the day header row is not read as a slot', !imported.grid['1']['Hours']);
+    // "Rhul" is a real typo in the team's own sheet. It must be reported, not silently dropped.
+    check('an unmatched name is reported', imported.unmatched.has('Rhul'), JSON.stringify([...imported.unmatched.keys()]));
+    check('and that cell is left empty', !imported.grid['2'][slotIds[3]].L3);
+    check('the rest of that row still imported', imported.grid['2'][slotIds[3]].L1 === 'r7');
+    // Monday 5 rows x 3 lines = 15, Tuesday 2 rows x 3 lines = 6 less the "Rhul" typo = 5.
+    // The trailing "Exception" column matches no line name, so it must not add a 21st.
+    check('the stray Exception column adds nothing', imported.assigned === 20, String(imported.assigned));
+
+    console.log('\n25. Importing only touches the days present in the file');
+    State.lineRoster = { slots: L.DEFAULT_ROSTER_SLOTS, grid: JSON.parse(JSON.stringify(auto.grid)) };
+    const weekendBefore = JSON.stringify(State.lineRoster.grid['6']);
+    const partial = L.parseRosterCsv(SHEET);
+    Object.keys(partial.grid).forEach(d => { State.lineRoster.grid[d] = partial.grid[d]; });
+    check('Saturday was left exactly as it was', JSON.stringify(State.lineRoster.grid['6']) === weekendBefore);
+    check('Monday was replaced by the file', State.lineRoster.grid['1'][slotIds[0]].L1 === 'r0');
+
+    console.log('\n26. Name matching against the agent roster');
+    check('exact name', (L.matchAgentByName('Ganesh') || {}).name === 'Ganesh');
+    check('case-insensitive', (L.matchAgentByName('  krishna ') || {}).name === 'Krishna');
+    check('a typo matches nobody', L.matchAgentByName('Rhul') === null);
+    check('blank matches nobody', L.matchAgentByName('   ') === null);
+    State.agents = ROSTER_AGENTS.concat([{ id: 'rx', name: 'Ram Narayana', role: 'support', isAvailable: true }]);
+    check('an exact match still wins over a first-name match', (L.matchAgentByName('Ram') || {}).id === 'r0');
+    check('a first name resolves to the full name when unique', (L.matchAgentByName('Narayana') || {}) .id === undefined);
+    State.agents = ROSTER_AGENTS;
     console.log(`\n${pass} passed, ${fail} failed\n`);
     process.exit(fail === 0 ? 0 : 1);
 })();
