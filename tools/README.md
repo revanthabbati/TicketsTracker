@@ -147,6 +147,36 @@ unauthenticated REST write at all. Only a real request answers that, so the firs
 loads v1.4.0, check that a check-in actually sticks. If rules reject it the popup says
 "permission denied" rather than failing silently.
 
+## `notify-check.js`
+
+Checks that the extension never announces the same ticket twice.
+
+```bash
+node tools/notify-check.js
+```
+
+Agents reported the notifier re-announcing their whole backlog every minute, including tickets
+they had marked as read. The cause was a one-line retention bug that only shows up once an
+agent has more than `MAX_KNOWN_IDS` tickets — so it could not be reproduced on a small test
+account, and nothing on screen hinted at it. Reproducing it needs scale and repetition, which
+is precisely what clicking through the popup cannot do.
+
+The harness runs the real `checkForNewAssignments()` over a fake `chrome.storage` for many
+consecutive polls, and covers:
+
+- **the reported bug** — 360 tickets polled six times must announce nothing. Against the old
+  code this fails with "360 announced, 60 forgotten", which is the bug exactly: the retention
+  line kept the *last* n of `[known, ...current]`, and since `myTickets` is sorted newest-first
+  that tail was the *oldest*, so the newest ids fell out on every poll.
+- **the read backstop** — wipe `knownTicketIds` entirely and tickets already marked read must
+  still stay silent, while genuinely unread ones still come through.
+- **a full storage quota** — a failed write of the bulky popup cache must not take the id list
+  down with it and restart the loop.
+- seeding a fresh install, and switching identity, both staying silent.
+
+It extracts `checkForNewAssignments` and its helpers from `background.js` at runtime, so it
+tests what actually ships. No network, no credentials, no production data.
+
 ## Diagnosing a bad answer in the app
 
 The app logs each planner decision to the browser console as `AI Search plan: {...}`. Nearly

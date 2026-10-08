@@ -146,23 +146,57 @@ async function checkForNewAssignments() {
         // fresh install (or switching to a different agent) doesn't fire one
         // notification per pre-existing ticket.
         if (!Array.isArray(knownTicketIds)) {
-            await chrome.storage.local.set({
-                knownTicketIds: myTickets.map(t => t.id),
-                myTickets
-            });
+            await chrome.storage.local.set({ knownTicketIds: myTickets.map(t => t.id) });
+            try { await chrome.storage.local.set({ myTickets }); } catch (err) { /* cache only */ }
+            applyBadge(computeBadge(myTickets, readTicketIds));
+            return;
+        }
+
+        // One-time repair. The truncation bug below dropped currently-assigned tickets out of
+        // knownTicketIds, so anyone affected has a list that wrongly says their whole backlog
+        // is new. Re-seed it once, silently, exactly as a first run would -- otherwise the fix
+        // itself would deliver one last flood on the way to behaving. The badge still shows
+        // anything genuinely unread, so nothing is lost by not notifying for this one poll.
+        const { knownIdsRepaired } = await chrome.storage.local.get('knownIdsRepaired');
+        if (!knownIdsRepaired) {
+            const repaired = Array.from(new Set([...myTickets.map(t => t.id), ...knownTicketIds]));
+            await chrome.storage.local.set({ knownTicketIds: repaired, knownIdsRepaired: true });
+            try { await chrome.storage.local.set({ myTickets }); } catch (err) { /* cache only */ }
             applyBadge(computeBadge(myTickets, readTicketIds));
             return;
         }
 
         const knownSet = new Set(knownTicketIds);
-        const newOnes = myTickets.filter(t => !knownSet.has(t.id));
+        const readSet = new Set(readTicketIds || []);
+        // A ticket you have already read is never new, whatever knownTicketIds says. This is
+        // a backstop rather than the primary guard: if that list is ever lost or truncated,
+        // the worst case becomes a silent re-notify of genuinely unread work, instead of the
+        // whole backlog arriving again every minute.
+        const newOnes = myTickets.filter(t => !knownSet.has(t.id) && !readSet.has(t.id));
 
         if (newOnes.length > 0) {
             notifyNewAssignments(newOnes);
         }
 
-        const updatedKnown = Array.from(new Set([...knownTicketIds, ...myTickets.map(t => t.id)])).slice(-MAX_KNOWN_IDS);
-        await chrome.storage.local.set({ knownTicketIds: updatedKnown, myTickets });
+        // Every ticket currently assigned must be remembered, or it looks new again on the
+        // next poll. The old line took the LAST n of [known..., current...]; since myTickets
+        // is sorted newest-first, that tail was the OLDEST of them -- so once somebody passed
+        // n tickets their newest ones dropped out of the list and re-notified every minute.
+        // Current ids now come first and the cap can only ever discard older history.
+        const currentIds = myTickets.map(t => t.id);
+        const currentSet = new Set(currentIds);
+        const history = knownTicketIds.filter(id => !currentSet.has(id));
+        const updatedKnown = [...currentIds, ...history].slice(0, Math.max(MAX_KNOWN_IDS, currentIds.length));
+
+        // Written on its own, and first: it is a few KB and it is what stops duplicate
+        // notifications. myTickets is only a render cache, and bundling the two meant a
+        // failure saving the cache (a full storage quota, say) also lost the ids.
+        await chrome.storage.local.set({ knownTicketIds: updatedKnown });
+        try {
+            await chrome.storage.local.set({ myTickets });
+        } catch (err) {
+            console.warn('Tracker Notifier: could not cache tickets for the popup', err);
+        }
         applyBadge(computeBadge(myTickets, readTicketIds));
     } catch (err) {
         console.error('Tracker Notifier: poll failed', err);
